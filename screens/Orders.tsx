@@ -4,8 +4,10 @@ import { Order } from '../types';
 import { useCurrency } from '../CurrencyContext';
 import { supabase } from '../supabase';
 import { processOrderCompletion } from '../utils';
-import { Receipt } from '../components/Receipt';
 import { PaymentModal } from '../components/PaymentModal';
+
+// IMPORT MỚI: Service in ấn iframe (Đảm bảo file printService.ts đã được update như bước trước)
+import { printOrderReceipt } from '../utils/printService';
 
 type Tab = 'Pending' | 'Completed' | 'Cancelled';
 
@@ -17,13 +19,7 @@ export const Orders: React.FC = () => {
   const { formatPrice } = useCurrency();
   const [orders, setOrders] = useState<OrderWithStaff[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  
-  // -- Selection State --
   const [selectedOrder, setSelectedOrder] = useState<OrderWithStaff | null>(null);
-  
-  // -- Printing State --
-  // We utilize a simple state to pass data to the hidden receipt component.
-  const [printData, setPrintData] = useState<OrderWithStaff | null>(null);
 
   // -- Payment Modal State --
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
@@ -31,36 +27,18 @@ export const Orders: React.FC = () => {
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
   const [now, setNow] = useState(new Date());
-
-  // Tab State
   const [activeTab, setActiveTab] = useState<Tab>('Pending');
-  
-  // Filters
   const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [staffFilter, setStaffFilter] = useState('All Staff');
   const [staffList, setStaffList] = useState<string[]>([]);
 
-  // --- NATIVE PRINT LOGIC ---
-  const triggerPrint = (order: OrderWithStaff) => {
-      // 1. Set the data for the hidden receipt component
-      setPrintData(order);
-      
-      // 2. Wait for React to re-render the Receipt with new data
-      // Then call the browser's native print window.
-      // The CSS in Receipt.tsx will handle hiding the app and showing only the receipt.
-      setTimeout(() => {
-          window.print();
-      }, 200);
-  };
-
-  // --- DATA FETCHING ---
+  // --- DATA FETCHING (Giữ nguyên) ---
   useEffect(() => {
     fetchOrders();
     const channel = supabase.channel('orders-realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchOrders)
       .subscribe();
-
     const timer = setInterval(() => setNow(new Date()), 60000);
     return () => { supabase.removeChannel(channel); clearInterval(timer); };
   }, [activeTab, startDate, endDate]); 
@@ -92,11 +70,8 @@ export const Orders: React.FC = () => {
     if (data) {
         const mapped = data.map((o: any) => {
             let tableDisplay = 'Unknown';
-            if (o.table_id === 'Takeaway') {
-                tableDisplay = 'Takeaway';
-            } else if (o.tables && o.tables.label) {
-                tableDisplay = o.tables.label;
-            }
+            if (o.table_id === 'Takeaway') tableDisplay = 'Takeaway';
+            else if (o.tables && o.tables.label) tableDisplay = o.tables.label;
 
             const staffName = o.users?.full_name || o.staff_name || 'Unknown Staff';
             const staffEmail = o.users?.email || '';
@@ -120,7 +95,6 @@ export const Orders: React.FC = () => {
             };
         });
         setOrders(mapped);
-        
         if (activeTab !== 'Pending') {
              const staffs = Array.from(new Set(mapped.map((o:any) => o.staff))) as string[];
              setStaffList(['All Staff', ...staffs]);
@@ -140,25 +114,36 @@ export const Orders: React.FC = () => {
   const initiatePayment = (order: OrderWithStaff, e?: React.MouseEvent) => {
       e?.stopPropagation();
       setOrderForPayment(order);
-      setPrintData(order); // Pre-load print data just in case
       setIsPaymentModalOpen(true);
   };
 
-  const handlePaymentConfirm = async (method: 'Cash' | 'Card' | 'Transfer') => {
+  // Cập nhật logic xử lý thanh toán và in
+  const handlePaymentConfirm = async (method: 'Cash' | 'Card' | 'Transfer', shouldPrint: boolean) => {
       if (!orderForPayment) return;
       setIsProcessingPayment(true);
       try {
+          // 1. Cập nhật DB
           await processOrderCompletion(orderForPayment.id, method);
           
+          // 2. Tạo đối tượng order đã cập nhật để in
+          const completedOrder = { 
+            ...orderForPayment, 
+            status: 'Completed', 
+            payment_method: method 
+          };
+
+          // 3. IN HÓA ĐƠN (Nếu user chọn in)
+          if (shouldPrint) {
+              console.log("Auto-printing bill for:", completedOrder.id);
+              printOrderReceipt(completedOrder);
+          }
+          
+          // 4. Reset & Refresh
           setIsPaymentModalOpen(false);
           setOrderForPayment(null);
+          if (selectedOrder?.id === orderForPayment.id) setSelectedOrder(null);
           
-          // Refresh list
           await fetchOrders();
-          
-          // Auto-print receipt after payment
-          const updatedOrder = { ...orderForPayment, status: 'Completed', payment_method: method } as OrderWithStaff;
-          triggerPrint(updatedOrder);
 
       } catch (error: any) {
           alert("Payment failed: " + error.message);
@@ -184,8 +169,8 @@ export const Orders: React.FC = () => {
             <PaymentModal 
               isOpen={isPaymentModalOpen}
               onClose={() => setIsPaymentModalOpen(false)}
-              onConfirm={handlePaymentConfirm}
-              onPrint={() => triggerPrint(orderForPayment)}
+              onConfirm={handlePaymentConfirm} // Đã update signature
+              onPrint={() => printOrderReceipt(orderForPayment)} // In test từ modal
               totalAmount={orderForPayment.total}
               orderId={orderForPayment.id}
               isProcessing={isProcessingPayment}
@@ -268,7 +253,7 @@ export const Orders: React.FC = () => {
                                 {activeTab === 'Completed' && (
                                   <div className="flex gap-2 mt-2">
                                     <button 
-                                      onClick={(e) => { e.stopPropagation(); triggerPrint(order); }}
+                                      onClick={(e) => { e.stopPropagation(); printOrderReceipt(order); }}
                                       className="w-full py-2 bg-background border border-border rounded-lg text-secondary hover:text-white hover:border-primary transition-colors font-bold text-xs flex items-center justify-center gap-2"
                                     >
                                       <Printer size={14} /> Print Bill
@@ -319,18 +304,12 @@ export const Orders: React.FC = () => {
                         </div>
                     ) : (
                        <div className="p-6 border-t border-border flex justify-end gap-3">
-                          <button onClick={(e) => { e.stopPropagation(); triggerPrint(selectedOrder); }} className="px-6 py-3 bg-white text-black rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-gray-200 transition-colors shadow-lg"><Printer size={16}/> Print Bill</button>
+                          <button onClick={(e) => { e.stopPropagation(); printOrderReceipt(selectedOrder); }} className="px-6 py-3 bg-white text-black rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-gray-200 transition-colors shadow-lg"><Printer size={16}/> Print Bill</button>
                        </div>
                     )}
                 </div>
             </div>
         )}
-
-        {/* --- ALWAYS MOUNTED RECEIPT (HIDDEN via Fixed Positioning) --- */}
-        {/* The ID 'printable-receipt-area' matches the CSS selector in Receipt.tsx to make it visible during print */}
-        <div id="printable-receipt-area" style={{ position: 'fixed', top: '-10000px', left: '-10000px' }}>
-             <Receipt data={printData} />
-        </div>
     </div>
   );
 };
