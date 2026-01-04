@@ -145,7 +145,7 @@ export const printOrderReceipt = (order: any) => {
         <div class="header text-center">
             <div class="store-name">${config.storeName}</div>
             <div class="store-info">${config.address}</div>
-            <div class="store-info">Hotline: 09xx.xxx.xxx</div> 
+            <div class="store-info">Hotline: 0966.742.573 - 0981.110.666</div> 
         </div>
 
         <div class="divider"></div>
