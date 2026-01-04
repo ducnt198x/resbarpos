@@ -1,0 +1,5 @@
+{
+  "name": "Restaurant POS",
+  "description": "A comprehensive dark-themed Point of Sale system for restaurants including dashboard, menu management, floor plan, order tracking, and inventory.",
+  "requestFramePermissions": []
+}
