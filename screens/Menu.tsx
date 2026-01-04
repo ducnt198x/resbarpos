@@ -9,6 +9,7 @@ import {
 import { MenuItem, InventoryItem, MenuItemIngredient } from '../types';
 import { supabase, isSupabaseConfigured } from '../supabase';
 import { useCurrency } from '../CurrencyContext';
+import { printBarTicket } from '../utils/printService';
 
 export const Menu: React.FC = () => {
   const { formatPrice } = useCurrency();
@@ -139,8 +140,12 @@ export const Menu: React.FC = () => {
           }));
           await supabase.from('order_items').insert(itemsPayload);
 
+          // ---> THÊM ĐOẠN NÀY <---
+          printBarTicket(orderId, 'Takeaway', 'Takeaway', cart);
+          // -----------------------
+
           // Success & Reset
-          alert(`Takeaway order ${orderId} sent to kitchen!`);
+          // alert(`Takeaway order ${orderId} sent to kitchen!`); // Có thể bỏ alert nếu muốn nhanh
           setCart([]);
           setShowCheckoutModal(false);
       } catch (e: any) {
@@ -181,7 +186,15 @@ export const Menu: React.FC = () => {
           }));
           await supabase.from('order_items').insert(itemsPayload);
 
-          alert(`Table ${tableId} order placed!`);
+          // ---> THÊM ĐOẠN NÀY <---
+          // Tìm tên bàn hiển thị (VD: "Bàn T-01") thay vì ID
+          const tableObj = availableTables.find(t => t.id === tableId);
+          const tableLabel = tableObj ? tableObj.label : tableId;
+          
+          printBarTicket(orderId, 'Dine-in', tableLabel, cart);
+          // -----------------------
+
+          // Success & Reset
           setCart([]);
           setShowCheckoutModal(false);
       } catch (e: any) {
