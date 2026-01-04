@@ -5,8 +5,9 @@ import { useCurrency } from '../CurrencyContext';
 interface PaymentModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConfirm: (method: 'Cash' | 'Card' | 'Transfer') => void;
-  onPrint: () => void; // New prop for printing
+  // Cập nhật: onConfirm nhận thêm tham số shouldPrint
+  onConfirm: (method: 'Cash' | 'Card' | 'Transfer', shouldPrint: boolean) => void;
+  onPrint: () => void; // Giữ nguyên để test in lẻ
   totalAmount: number;
   orderId: string;
   isProcessing: boolean;
@@ -23,12 +24,16 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
 }) => {
   const { formatPrice } = useCurrency();
   const [method, setMethod] = useState<'Cash' | 'Card' | 'Transfer'>('Cash');
+  
+  // State mới: Mặc định là CÓ in (true)
+  const [shouldPrint, setShouldPrint] = useState(true);
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div className="bg-surface border border-border rounded-2xl w-full max-w-md shadow-2xl flex flex-col">
+        {/* Header */}
         <div className="p-6 border-b border-border flex justify-between items-center">
           <h3 className="font-bold text-white text-xl">Confirm Payment</h3>
           <button onClick={onClose} disabled={isProcessing}>
@@ -36,23 +41,25 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
           </button>
         </div>
         
+        {/* Body */}
         <div className="p-6 space-y-6">
           <div className="text-center relative">
             <p className="text-secondary text-sm mb-1">Total to Pay</p>
             <p className="text-4xl font-bold text-white">{formatPrice(totalAmount)}</p>
             <p className="text-sm text-secondary mt-2">Order {orderId}</p>
             
-            {/* Print Bill Button */}
+            {/* Nút in lẻ (Test) */}
             <button 
               onClick={onPrint}
               className="absolute right-0 top-1/2 -translate-y-1/2 p-2 bg-surface border border-border rounded-lg text-secondary hover:text-white hover:border-primary transition-colors flex flex-col items-center gap-1"
-              title="Print Bill"
+              title="Print Preview"
             >
                 <Printer size={16} />
-                <span className="text-[10px] font-bold">Bill</span>
+                <span className="text-[10px] font-bold">Xem</span>
             </button>
           </div>
 
+          {/* Payment Methods */}
           <div className="grid grid-cols-3 gap-3">
             {['Cash', 'Card', 'Transfer'].map((m) => (
               <button 
@@ -66,11 +73,32 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               </button>
             ))}
           </div>
+
+          {/* Tùy chọn In hóa đơn */}
+          <div className="flex items-center justify-center pt-2">
+            <label className="flex items-center gap-3 cursor-pointer group p-2 rounded-lg hover:bg-white/5 transition-colors">
+              <div className={`w-6 h-6 rounded border flex items-center justify-center transition-all ${shouldPrint ? 'bg-primary border-primary text-background' : 'border-secondary text-transparent'}`}>
+                <Check size={16} strokeWidth={4} />
+              </div>
+              <input 
+                type="checkbox" 
+                className="hidden" 
+                checked={shouldPrint} 
+                onChange={() => setShouldPrint(!shouldPrint)}
+              />
+              <span className={`font-bold transition-colors ${shouldPrint ? 'text-white' : 'text-secondary'}`}>
+                Auto Print Receipt
+              </span>
+              <Printer size={16} className={shouldPrint ? 'text-primary' : 'text-secondary'}/>
+            </label>
+          </div>
         </div>
 
+        {/* Footer Action */}
         <div className="p-6 border-t border-border">
           <button 
-            onClick={() => onConfirm(method)} 
+            // Truyền cả method và shouldPrint ra ngoài
+            onClick={() => onConfirm(method, shouldPrint)} 
             disabled={isProcessing}
             className="w-full py-4 bg-primary text-background font-bold rounded-xl text-lg hover:bg-primary-hover shadow-lg shadow-primary/20 flex items-center justify-center gap-2 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
           >
