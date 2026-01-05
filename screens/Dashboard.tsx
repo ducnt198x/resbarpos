@@ -2,21 +2,42 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { DollarSign, Receipt, ShoppingBag, Loader2, Wallet, Users, Calendar, Filter } from 'lucide-react';
 import { useCurrency } from '../CurrencyContext';
+import { useTheme } from '../ThemeContext';
 import { supabase } from '../supabase';
 
 type FilterType = 'today' | 'week' | 'month' | 'custom';
 
+const CustomYAxisTick = ({ x, y, payload }: any) => {
+  const maxLength = 15;
+  const name = payload.value as string;
+  // Use currentColor to adapt to theme
+  
+  if (name.length > maxLength) {
+      return (
+          <text x={x} y={y} dy={4} textAnchor="end" fill="currentColor" className="text-text-secondary" fontSize={11}>
+              <title>{name}</title>
+              {name.substring(0, maxLength) + '...'}
+          </text>
+      );
+  }
+
+  return (
+      <text x={x} y={y} dy={4} textAnchor="end" fill="currentColor" className="text-text-secondary" fontSize={11}>
+          {name}
+      </text>
+  );
+};
+
 export const Dashboard: React.FC = () => {
   const { formatPrice } = useCurrency();
+  const { t } = useTheme();
   const [loading, setLoading] = useState(true);
   
-  // --- Filter States ---
   const [filterType, setFilterType] = useState<FilterType>('today');
   const [customDate, setCustomDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [selectedStaffId, setSelectedStaffId] = useState<string>('all');
   const [staffList, setStaffList] = useState<{id: string, full_name: string}[]>([]);
 
-  // --- Data States ---
   const [stats, setStats] = useState<any[]>([]);
   const [revenueData, setRevenueData] = useState<any[]>([]);
   const [staffPerformanceData, setStaffPerformanceData] = useState<any[]>([]);
@@ -76,6 +97,8 @@ export const Dashboard: React.FC = () => {
           const completedCount = completedOrders.length;
           const avgTicket = completedCount > 0 ? actualRevenue / completedCount : 0;
           
+          // Labels wrapped in t() later in render, or mapped here. 
+          // Mapping here is cleaner for array map in render
           setStats([
              { label: 'Actual Revenue', val: formatPrice(actualRevenue), icon: DollarSign, color: 'text-green-500', bgColor: 'bg-green-500/10' },
              { label: 'Provisional Revenue', val: formatPrice(provisionalRevenue), icon: Wallet, color: 'text-orange-500', bgColor: 'bg-orange-500/10' },
@@ -158,30 +181,30 @@ export const Dashboard: React.FC = () => {
   if (loading) return <div className="flex h-full items-center justify-center"><Loader2 className="animate-spin text-primary" size={48}/></div>;
 
   return (
-    <div className="flex-1 h-full bg-background overflow-y-auto p-8 custom-scrollbar">
+    <div className="flex-1 h-full bg-background overflow-y-auto p-8 custom-scrollbar transition-colors">
       
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center mb-8 gap-4">
           <div>
-            <h2 className="text-3xl font-bold text-white">Dashboard Overview</h2>
-            <p className="text-secondary text-sm mt-1">Real-time performance metrics</p>
+            <h2 className="text-3xl font-bold text-text-main">{t('Dashboard Overview')}</h2>
+            <p className="text-secondary text-sm mt-1">{t('Real-time performance metrics')}</p>
           </div>
 
-          <div className="flex flex-col md:flex-row gap-3 bg-surface p-2 rounded-xl border border-border w-full md:w-auto">
+          <div className="flex flex-col md:flex-row gap-3 bg-surface p-2 rounded-xl border border-border w-full md:w-auto shadow-sm">
               <div className="flex bg-background rounded-lg p-1 border border-border">
                   {(['today', 'week', 'month'] as const).map(ft => (
                       <button
                         key={ft}
                         onClick={() => { setFilterType(ft); }}
-                        className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${filterType === ft ? 'bg-primary text-background shadow' : 'text-secondary hover:text-white'}`}
+                        className={`px-3 py-1.5 rounded-md text-xs font-bold capitalize transition-all ${filterType === ft ? 'bg-primary text-background shadow' : 'text-secondary hover:text-text-main'}`}
                       >
-                        {ft}
+                        {t(ft)}
                       </button>
                   ))}
               </div>
 
-              <div className="relative flex items-center gap-2 bg-background px-3 py-1.5 rounded-lg border border-border cursor-pointer hover:border-primary transition-colors group">
-                  <Calendar size={14} className="text-secondary group-hover:text-primary transition-colors" />
-                  <span className={`text-xs font-bold ${filterType === 'custom' ? 'text-primary' : 'text-white'}`}>
+              <div className="relative flex items-center gap-2 bg-background px-3 py-1.5 rounded-lg border border-border hover:border-primary transition-colors group">
+                  <Calendar size={14} className="text-secondary group-hover:text-primary transition-colors pointer-events-none" />
+                  <span className={`text-xs font-bold pointer-events-none ${filterType === 'custom' ? 'text-primary' : 'text-text-main'}`}>
                     {customDate}
                   </span>
                   <input 
@@ -191,7 +214,8 @@ export const Dashboard: React.FC = () => {
                         setCustomDate(e.target.value); 
                         setFilterType('custom'); 
                     }}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                    onClick={(e) => { try { (e.target as any).showPicker(); } catch(err) {} }}
+                    className="absolute inset-0 w-full h-full opacity-0 z-10 cursor-pointer"
                   />
               </div>
 
@@ -200,11 +224,11 @@ export const Dashboard: React.FC = () => {
                   <select 
                     value={selectedStaffId}
                     onChange={(e) => setSelectedStaffId(e.target.value)}
-                    className="bg-transparent text-xs font-bold outline-none text-white appearance-none cursor-pointer min-w-[100px]"
+                    className="bg-surface border border-border text-text-main text-sm rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-primary cursor-pointer min-w-[100px]"
                   >
-                      <option value="all">All Staff</option>
+                      <option value="all" style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-main)' }}>{t('All')}</option>
                       {staffList.map(s => (
-                          <option key={s.id} value={s.id}>{s.full_name}</option>
+                          <option key={s.id} value={s.id} style={{ backgroundColor: 'var(--color-surface)', color: 'var(--color-text-main)' }}>{s.full_name}</option>
                       ))}
                   </select>
               </div>
@@ -213,11 +237,11 @@ export const Dashboard: React.FC = () => {
       
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
          {stats.map((s, i) => (
-             <div key={i} className="p-5 rounded-xl bg-surface border border-border flex flex-col justify-between hover:border-primary/30 transition-colors">
+             <div key={i} className="p-5 rounded-xl bg-surface border border-border flex flex-col justify-between hover:border-primary/30 transition-colors shadow-sm">
                  <div className="flex justify-between items-start mb-4">
                    <div>
-                     <span className="text-secondary text-xs font-bold uppercase tracking-wider block mb-1">{s.label}</span>
-                     <div className="text-2xl font-bold text-white">{s.val}</div>
+                     <span className="text-secondary text-xs font-bold uppercase tracking-wider block mb-1">{t(s.label)}</span>
+                     <div className="text-2xl font-bold text-text-main">{s.val}</div>
                    </div>
                    <div className={`p-2 rounded-lg ${s.bgColor} ${s.color}`}>
                      <s.icon size={20} />
@@ -230,31 +254,30 @@ export const Dashboard: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         
         {/* --- Main Revenue Chart --- */}
-        <div className="lg:col-span-2 bg-surface rounded-xl border border-border p-6 h-[450px] flex flex-col">
+        <div className="lg:col-span-2 bg-surface rounded-xl border border-border p-6 h-[450px] flex flex-col shadow-sm">
             <div className="flex items-center gap-3 mb-6">
                 <div className="p-2 bg-primary/10 rounded-lg text-primary"><DollarSign size={20}/></div>
                 <div>
-                    <h3 className="text-white font-bold text-lg">Revenue Trends</h3>
+                    <h3 className="text-text-main font-bold text-lg">{t('Revenue Trends')}</h3>
                     <p className="text-xs text-secondary">
-                        {filterType === 'today' || filterType === 'custom' ? 'Hourly breakdown' : 'Daily breakdown'}
+                        {filterType === 'today' || filterType === 'custom' ? t('Hourly breakdown') : t('Daily breakdown')}
                     </p>
                 </div>
             </div>
-            {/* Added Explicit Style Dimensions to Fix Recharts Warning */}
             <div className="w-full" style={{ width: '100%', height: 400, minHeight: 400 }}>
                 <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={revenueData} margin={{ top: 10, right: 30, left: 0, bottom: 5 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#24473b" vertical={false}/>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" vertical={false}/>
                     <XAxis 
                         dataKey="name" 
-                        stroke="#93c8b6" 
+                        stroke="var(--color-text-secondary)" 
                         fontSize={11} 
                         axisLine={false} 
                         tickLine={false} 
                         dy={10}
                     />
                     <YAxis 
-                        stroke="#93c8b6" 
+                        stroke="var(--color-text-secondary)" 
                         fontSize={11} 
                         axisLine={false} 
                         tickLine={false}
@@ -263,14 +286,21 @@ export const Dashboard: React.FC = () => {
                         width={45}
                     />
                     <Tooltip 
-                        contentStyle={{backgroundColor: '#1a2c26', borderRadius:'12px', border:'1px solid #24473b', color:'#fff', boxShadow: '0 4px 20px rgba(0,0,0,0.5)'}} 
-                        cursor={{fill:'#24473b', opacity:0.4}}
+                        contentStyle={{
+                            backgroundColor: 'var(--color-surface)', 
+                            borderRadius:'12px', 
+                            border:'1px solid var(--color-border)', 
+                            color:'var(--color-text-main)', 
+                            boxShadow: '0 4px 20px rgba(0,0,0,0.1)'
+                        }} 
+                        cursor={{fill:'var(--color-border)', opacity:0.4}}
                         formatter={(value: number) => [formatPrice(value), 'Revenue']}
-                        labelStyle={{color: '#93c8b6', marginBottom: '4px', fontSize: '12px'}}
+                        labelStyle={{color: 'var(--color-text-secondary)', marginBottom: '4px', fontSize: '12px'}}
                     />
                     <Bar 
                         dataKey="value" 
-                        fill="#19e6a2" 
+                        fill="var(--color-primary-rgb)" 
+                        className="fill-primary"
                         radius={[4,4,0,0]} 
                         barSize={filterType === 'today' || filterType === 'custom' ? 24 : 16}
                     />
@@ -280,15 +310,14 @@ export const Dashboard: React.FC = () => {
         </div>
 
         {/* --- Staff Performance Chart --- */}
-        <div className="bg-surface rounded-xl border border-border p-6 h-[450px] flex flex-col">
+        <div className="bg-surface rounded-xl border border-border p-6 h-[450px] flex flex-col shadow-sm">
              <div className="flex items-center gap-3 mb-6">
                 <div className="p-2 bg-blue-500/10 rounded-lg text-blue-500"><Users size={20}/></div>
                 <div>
-                    <h3 className="text-white font-bold text-lg">Staff Performance</h3>
-                    <p className="text-xs text-secondary">Top revenue generators</p>
+                    <h3 className="text-text-main font-bold text-lg">{t('Staff Performance')}</h3>
+                    <p className="text-xs text-secondary">{t('Top revenue generators')}</p>
                 </div>
             </div>
-            {/* Added Explicit Style Dimensions to Fix Recharts Warning */}
             <div className="w-full" style={{ width: '100%', height: 400, minHeight: 400 }}>
                 {staffPerformanceData.length === 0 ? (
                     <div className="h-full flex flex-col items-center justify-center text-secondary opacity-50">
@@ -297,26 +326,26 @@ export const Dashboard: React.FC = () => {
                     </div>
                 ) : (
                     <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={staffPerformanceData} layout="vertical" margin={{ top: 0, right: 20, left: 40, bottom: 0 }} barGap={2}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#24473b" horizontal={false}/>
+                        <BarChart data={staffPerformanceData} layout="vertical" margin={{ top: 0, right: 20, left: 30, bottom: 0 }} barGap={2}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" horizontal={false}/>
                             <XAxis type="number" hide />
                             <YAxis 
                                 dataKey="name" 
                                 type="category" 
-                                stroke="#fff" 
-                                fontSize={11} 
-                                width={80}
+                                stroke="var(--color-text-main)" 
+                                width={100}
                                 tickLine={false}
                                 axisLine={false}
+                                tick={<CustomYAxisTick />}
                             />
                             <Tooltip 
-                                cursor={{fill:'#24473b', opacity:0.4}}
+                                cursor={{fill:'var(--color-border)', opacity:0.4}}
                                 content={({ active, payload }) => {
                                     if (active && payload && payload.length) {
                                         const data = payload[0].payload;
                                         return (
                                             <div className="bg-surface border border-border p-3 rounded-lg shadow-xl">
-                                                <p className="font-bold text-white mb-1">{data.name}</p>
+                                                <p className="font-bold text-text-main mb-1">{data.name}</p>
                                                 <div className="space-y-1">
                                                     <p className="text-primary text-xs font-bold">Revenue: {formatPrice(data.revenue)}</p>
                                                     <p className="text-secondary text-xs">Orders: {data.orders}</p>

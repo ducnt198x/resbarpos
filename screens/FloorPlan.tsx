@@ -1,123 +1,108 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { Plus, Layout, Save, Move, ShoppingBag, Trash2, CreditCard, Printer, Armchair, ChefHat, Loader2, Minus, Square, Circle, RectangleHorizontal, X, ArrowRightLeft, DollarSign, User, Merge, GripHorizontal, Scaling, Check } from 'lucide-react';
+import { 
+  Plus, Layout, Save, Move, ShoppingBag, Trash2, CreditCard, Printer, 
+  Armchair, ChefHat, Loader2, Minus, Square, Circle, RectangleHorizontal, 
+  X, Users, Type, AlertTriangle, Maximize2, ArrowRightLeft, Check, Grid, MoreHorizontal
+} from 'lucide-react';
 import { useCurrency } from '../CurrencyContext';
+import { useTheme } from '../ThemeContext';
 import { supabase } from '../supabase';
 import { MenuItem } from '../types';
+import { PaymentModal } from '../components/PaymentModal';
+import { TransferModal } from '../components/TransferModal';
 import { processOrderCompletion } from '../utils';
+import { printOrderReceipt } from '../utils/printService';
 
-// Local types matching the component logic (using 'qty' instead of 'quantity')
-interface OrderItem {
-  id: number;
-  name: string;
-  price: number;
-  qty: number;
-  isNew?: boolean;
-}
-
+// Local types
+interface OrderItem { id: number; name: string; price: number; qty: number; isNew?: boolean; }
 export type TableStatus = 'Available' | 'Occupied' | 'Reserved';
 export type TableShape = 'square' | 'round' | 'rect';
-
-export interface TableData {
-  id: string;
-  label: string;
-  shape: TableShape;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  seats: number;
-  status: TableStatus;
-  guests?: number;
-  orderId?: string;
-  orderStatus?: string;
-  orderTotal?: number;
-  items: OrderItem[];
-  waiter?: string;
-  timeElapsed?: string;
-}
+export interface TableData { id: string; label: string; shape: TableShape; x: number; y: number; width: number; height: number; seats: number; status: TableStatus; guests?: number; orderId?: string; orderStatus?: string; orderTotal?: number; items: OrderItem[]; waiter?: string; timeElapsed?: string; }
 
 const TABLE_TEMPLATES = [
-  { label: 'Small Round', shape: 'round', width: 80, height: 80, seats: 2, icon: Circle },
-  { label: 'Standard Square', shape: 'square', width: 100, height: 100, seats: 4, icon: Square },
-  { label: 'Rectangular 4', shape: 'rect', width: 120, height: 80, seats: 4, icon: RectangleHorizontal },
-  { label: 'Large Dining', shape: 'rect', width: 160, height: 90, seats: 6, icon: RectangleHorizontal },
-  { label: 'Big Round', shape: 'round', width: 140, height: 140, seats: 8, icon: Circle },
-  { label: 'Long Bar', shape: 'rect', width: 200, height: 60, seats: 5, icon: RectangleHorizontal },
+  { label: 'Round (2)', shape: 'round', width: 80, height: 80, seats: 2, icon: Circle },
+  { label: 'Square (4)', shape: 'square', width: 100, height: 100, seats: 4, icon: Square },
+  { label: 'Rect (4)', shape: 'rect', width: 120, height: 80, seats: 4, icon: RectangleHorizontal },
+  { label: 'Large (6)', shape: 'rect', width: 160, height: 90, seats: 6, icon: RectangleHorizontal },
+  { label: 'Big Round (8)', shape: 'round', width: 140, height: 140, seats: 8, icon: Circle },
+  { label: 'Bar (5)', shape: 'rect', width: 200, height: 60, seats: 5, icon: RectangleHorizontal },
 ];
 
 export const FloorPlan: React.FC = () => {
   const { formatPrice } = useCurrency();
+  const { t } = useTheme();
   const [tables, setTables] = useState<TableData[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
-  
-  // Admin / Edit State
   const [role, setRole] = useState<'admin' | 'staff'>('staff');
+  
+  // --- EDIT MODE & DIRTY STATE ---
   const [editingTableId, setEditingTableId] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
 
-  const [autoPrintBill, setAutoPrintBill] = useState(true); 
-
-  // --- OPTIMIZED DRAG/RESIZE STATE ---
+  // Drag/Resize State
   const containerRef = useRef<HTMLDivElement>(null);
-  const tablesRef = useRef<TableData[]>([]);
+  const tablesRef = useRef<TableData[]>([]); 
   
-  const dragState = useRef<{
-    activeId: string | null;
-    mode: 'move' | 'resize' | null;
-    startX: number;
-    startY: number;
-    initialX: number;
-    initialY: number;
-    initialW: number;
-    initialH: number;
-    containerW: number;
-    containerH: number;
-    offsetX: number;
+  const dragState = useRef<{ 
+    activeId: string | null; 
+    mode: 'move' | 'resize' | null; 
+    startX: number; 
+    startY: number; 
+    initialX: number; 
+    initialY: number; 
+    initialW: number; 
+    initialH: number; 
+    containerW: number; 
+    containerH: number; 
+    offsetX: number; 
     offsetY: number;
-  }>({
-    activeId: null,
-    mode: null,
-    startX: 0,
-    startY: 0,
-    initialX: 0,
-    initialY: 0,
-    initialW: 0,
-    initialH: 0,
-    containerW: 0,
-    containerH: 0,
-    offsetX: 0,
-    offsetY: 0
+  }>({ 
+    activeId: null, mode: null, startX: 0, startY: 0, 
+    initialX: 0, initialY: 0, initialW: 0, initialH: 0, 
+    containerW: 0, containerH: 0, offsetX: 0, offsetY: 0,
   });
-
+  
   const [activeInteractionId, setActiveInteractionId] = useState<string | null>(null);
 
-  // Menu / New Order State
+  // Modal States
   const [showMenuModal, setShowMenuModal] = useState(false);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [menuSearch, setMenuSearch] = useState('');
   const [menuCategory, setMenuCategory] = useState('All');
   const [currentOrderItems, setCurrentOrderItems] = useState<OrderItem[]>([]);
-  const [guestCount, setGuestCount] = useState<number>(2);
-
-  // Table Operations
-  const [showTransferModal, setShowTransferModal] = useState(false);
-
-  // Payment Modal State
+  const [guestCount, setGuestCount] = useState<number>(1);
+  
+  // Payment States
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Card' | 'Transfer'>('Cash');
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
-  // ... (Giữ nguyên toàn bộ logic useEffect, Event Listeners, Fetch Data như cũ) ...
+  // Transfer/Merge States
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [isProcessingTransfer, setIsProcessingTransfer] = useState(false);
+
+  useEffect(() => { tablesRef.current = tables; }, [tables]);
+  
+  // Reset guest count when table selection changes
+  useEffect(() => {
+      if (selectedTableId) {
+          const table = tables.find(t => t.id === selectedTableId);
+          if (table) {
+              setGuestCount(table.guests && table.guests > 0 ? table.guests : 1);
+          }
+      }
+  }, [selectedTableId, tables]);
 
   useEffect(() => {
-    tablesRef.current = tables;
-  }, [tables]);
-
-  useEffect(() => {
-    fetchUserRole();
+    fetchUserRole(); 
     fetchData();
-    
-    const handleGlobalMouseMove = (e: MouseEvent) => {
+
+    // GLOBAL MOUSE EVENTS FOR DRAGGING (ONLY ACTIVE IN EDIT MODE)
+    const handleGlobalMouseMove = (e: MouseEvent) => { 
+        if (!isEditMode) return; // Strict Lock
+
         const { activeId, mode, containerW, containerH, offsetX, offsetY, startX, startY, initialW, initialH } = dragState.current;
         if (!activeId || !mode) return;
 
@@ -126,312 +111,205 @@ export const FloorPlan: React.FC = () => {
             let yPx = e.clientY - (containerRef.current?.getBoundingClientRect().top || 0) - offsetY;
             
             const currentTable = tablesRef.current.find(t => t.id === activeId);
-            const tW = currentTable?.width || 100;
+            const tW = currentTable?.width || 100; 
             const tH = currentTable?.height || 100;
-
-            xPx = Math.max(0, Math.min(xPx, containerW - tW));
+            xPx = Math.max(0, Math.min(xPx, containerW - tW)); 
             yPx = Math.max(0, Math.min(yPx, containerH - tH));
-
-            const xPerc = (xPx / containerW) * 100;
+            
+            const xPerc = (xPx / containerW) * 100; 
             const yPerc = (yPx / containerH) * 100;
-
+            
             setTables(prev => prev.map(t => t.id === activeId ? { ...t, x: xPerc, y: yPerc } : t));
-        } 
-        else if (mode === 'resize') {
-             const deltaX = e.clientX - startX;
+        } else if (mode === 'resize') {
+             const deltaX = e.clientX - startX; 
              const deltaY = e.clientY - startY;
-             const newWidth = Math.max(50, initialW + deltaX);
-             const newHeight = Math.max(50, initialH + deltaY);
+             const newWidth = Math.max(60, initialW + deltaX); 
+             const newHeight = Math.max(60, initialH + deltaY);
              setTables(prev => prev.map(t => t.id === activeId ? { ...t, width: newWidth, height: newHeight } : t));
         }
     };
 
-    const handleGlobalMouseUp = async () => {
+    const handleGlobalMouseUp = async () => { 
+        if (!isEditMode) return;
         const { activeId, mode } = dragState.current;
         if (activeId && mode) {
-            const finalTableState = tablesRef.current.find(t => t.id === activeId);
-            if (finalTableState) {
-                if (mode === 'move') {
-                    await supabase.from('tables').update({ x: finalTableState.x, y: finalTableState.y }).eq('id', activeId);
-                } else if (mode === 'resize') {
-                    await supabase.from('tables').update({ width: finalTableState.width, height: finalTableState.height }).eq('id', activeId);
-                }
-            }
+           setHasUnsavedChanges(true);
         }
-        dragState.current = { ...dragState.current, activeId: null, mode: null };
+        dragState.current = { ...dragState.current, activeId: null, mode: null }; 
         setActiveInteractionId(null);
     };
 
-    window.addEventListener('mousemove', handleGlobalMouseMove);
+    window.addEventListener('mousemove', handleGlobalMouseMove); 
     window.addEventListener('mouseup', handleGlobalMouseUp);
-
+    
     const channels = supabase.channel('floorplan-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tables' }, () => fetchData())
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchData())
-      .subscribe();
-
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'tables' }, () => {
+             if (!isEditMode) fetchData();
+        })
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchData())
+        .subscribe();
+        
     return () => { 
         supabase.removeChannel(channels); 
-        window.removeEventListener('mousemove', handleGlobalMouseMove);
-        window.removeEventListener('mouseup', handleGlobalMouseUp);
+        window.removeEventListener('mousemove', handleGlobalMouseMove); 
+        window.removeEventListener('mouseup', handleGlobalMouseUp); 
     };
-  }, []);
+  }, [isEditMode]);
 
-  // ... (Giữ nguyên các hàm fetchUserRole, fetchData, fetchTables, fetchMenuItems, getTimeElapsed) ...
-  const fetchUserRole = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-         if (user.email === 'ducnt198x@gmail.com') {
-             setRole('admin');
-         } else {
-             const { data } = await supabase.from('users').select('role').eq('id', user.id).single();
-             if (data) setRole(data.role);
-         }
-      }
-  };
-
-  const fetchData = async () => {
-    await Promise.all([fetchTables(), fetchMenuItems()]);
-    setLoading(false);
-  };
-
+  const fetchUserRole = async () => { const { data: { user } } = await supabase.auth.getUser(); if (user) { if (user.email === 'ducnt198x@gmail.com') { setRole('admin'); } else { const { data } = await supabase.from('users').select('role').eq('id', user.id).single(); if (data) setRole(data.role); } } };
+  const fetchData = async () => { await Promise.all([fetchTables(), fetchMenuItems()]); setLoading(false); };
+  
   const fetchTables = async () => {
-    const { data: tablesData } = await supabase.from('tables').select('*');
-    if (!tablesData) return;
+    if (hasUnsavedChanges && isEditMode) return;
 
-    const { data: activeOrders } = await supabase
-        .from('orders')
-        .select(`id, table_id, status, created_at, staff_name, guests, total_amount, order_items (id, quantity, price, menu_item_id, menu_items (name))`)
-        .in('status', ['Pending', 'Cooking', 'Ready']); 
-
+    const { data: tablesData } = await supabase.from('tables').select('*'); if (!tablesData) return;
+    const { data: activeOrders } = await supabase.from('orders').select(`id, table_id, status, created_at, staff_name, guests, total_amount, order_items (id, quantity, price, menu_item_id, menu_items (name))`).in('status', ['Pending', 'Cooking', 'Ready']); 
+    
     const mergedTables: TableData[] = tablesData.map((t: any) => {
         const activeOrder = activeOrders?.find((o: any) => o.table_id === t.id);
         let items: OrderItem[] = [];
-        if (activeOrder && activeOrder.order_items) {
-            items = activeOrder.order_items.map((oi: any) => {
-                let itemName = 'Unknown';
-                if (oi.menu_items) {
-                     itemName = Array.isArray(oi.menu_items) ? oi.menu_items[0]?.name : oi.menu_items.name;
-                }
-                return { id: oi.menu_item_id, name: itemName || 'Unknown', price: oi.price, qty: oi.quantity };
-            });
-        }
-        return {
-            id: t.id, label: t.label, shape: t.shape, x: Number(t.x), y: Number(t.y), width: Number(t.width), height: Number(t.height), seats: t.seats,
-            status: activeOrder ? 'Occupied' : 'Available',
-            guests: activeOrder ? (activeOrder.guests || 2) : 0,
-            waiter: activeOrder?.staff_name || '',
-            orderId: activeOrder?.id,
-            orderStatus: activeOrder?.status,
-            orderTotal: activeOrder?.total_amount || 0,
-            items: items,
-            timeElapsed: activeOrder ? getTimeElapsed(activeOrder.created_at) : undefined
-        };
+        if (activeOrder && activeOrder.order_items) { items = activeOrder.order_items.map((oi: any) => { let itemName = 'Unknown'; if (oi.menu_items) { itemName = Array.isArray(oi.menu_items) ? oi.menu_items[0]?.name : oi.menu_items.name; } return { id: oi.menu_item_id, name: itemName || 'Unknown', price: oi.price, qty: oi.quantity }; }); }
+        return { id: t.id, label: t.label, shape: t.shape, x: Number(t.x), y: Number(t.y), width: Number(t.width), height: Number(t.height), seats: t.seats, status: activeOrder ? 'Occupied' : 'Available', guests: activeOrder ? (activeOrder.guests || 2) : 0, waiter: activeOrder?.staff_name || '', orderId: activeOrder?.id, orderStatus: activeOrder?.status, orderTotal: activeOrder?.total_amount || 0, items: items, timeElapsed: activeOrder ? getTimeElapsed(activeOrder.created_at) : undefined };
     });
     setTables(mergedTables);
   };
-
-  const fetchMenuItems = async () => {
-    const { data } = await supabase.from('menu_items').select('*');
-    if (data) setMenuItems(data as MenuItem[]);
-  };
-
-  const getTimeElapsed = (startTime: string) => {
-      const start = new Date(startTime).getTime();
-      const now = new Date().getTime();
-      const diff = Math.floor((now - start) / 1000 / 60); 
-      return `${Math.floor(diff / 60)}:${(diff % 60).toString().padStart(2, '0')}`;
-  };
-
+  
+  const fetchMenuItems = async () => { const { data } = await supabase.from('menu_items').select('*'); if (data) setMenuItems(data as MenuItem[]); };
+  const getTimeElapsed = (startTime: string) => { const start = new Date(startTime).getTime(); const now = new Date().getTime(); const diff = Math.floor((now - start) / 1000 / 60); return `${Math.floor(diff / 60)}:${(diff % 60).toString().padStart(2, '0')}`; };
+  
   const selectedTable = useMemo(() => tables.find(t => t.id === selectedTableId), [tables, selectedTableId]);
+  const activeEditingTable = useMemo(() => tables.find(t => t.id === editingTableId), [tables, editingTableId]);
+  
   const calculateTotal = (items: OrderItem[]) => items.reduce((acc, item) => acc + (item.price * item.qty), 0);
   
-  // ... (Giữ nguyên checkLabelUnique, handleTableClick, handleTableDoubleClick, handleBackgroundClick) ...
-  const checkLabelUnique = (newLabel: string, excludeId?: string) => {
-      const exists = tables.some(t => t.label.toLowerCase() === newLabel.toLowerCase() && t.id !== excludeId);
-      if (exists) {
-          alert('Table Name already exists! Please choose a unique name.');
-          return false;
-      }
-      return true;
+  // --- INTERACTIONS (Strict Mode Locking) ---
+  const handleTableDoubleClick = (e: React.MouseEvent, table: TableData) => { 
+      e.stopPropagation(); 
+      if (role !== 'admin') return; 
+      setIsEditMode(true); 
+      setEditingTableId(table.id); 
+      setSelectedTableId(table.id); 
   };
-
-  const handleTableClick = (e: React.MouseEvent, table: TableData) => {
-      e.stopPropagation();
-      if (editingTableId && editingTableId !== table.id) {
-          setEditingTableId(null);
-      }
-      setSelectedTableId(table.id);
+  
+  const handleTableClick = (e: React.MouseEvent, table: TableData) => { 
+      e.stopPropagation(); 
+      if (isEditMode) { 
+          setEditingTableId(table.id); 
+      } else { 
+          // LIVE MODE: Select table to show Floating Panel
+          setEditingTableId(null); 
+          setSelectedTableId(table.id); 
+      } 
   };
+  
+  const handleMouseDownDrag = (e: React.MouseEvent, table: TableData) => { 
+      // STRICT LOCK: Absolutely no drag logic in Live Mode
+      if (!isEditMode) return; 
 
-  const handleTableDoubleClick = (e: React.MouseEvent, table: TableData) => {
-      e.stopPropagation();
-      if (role === 'admin') {
-          setEditingTableId(table.id);
-          setSelectedTableId(table.id);
-      }
-  };
-
-  const handleBackgroundClick = () => {
-      setSelectedTableId(null);
-      setEditingTableId(null);
-  };
-
-  // ... (Giữ nguyên logic Drag, Resize, CRUD) ...
-  const handleMouseDownMove = (e: React.MouseEvent, table: TableData) => {
-    if (!isEditMode && editingTableId !== table.id) return;
-    e.stopPropagation();
-    if (!containerRef.current) return;
-    const containerRect = containerRef.current.getBoundingClientRect();
-    const tableRect = e.currentTarget.getBoundingClientRect();
-    dragState.current = {
-        activeId: table.id,
-        mode: 'move',
-        startX: e.clientX,
-        startY: e.clientY,
-        initialX: table.x,
-        initialY: table.y,
-        initialW: table.width,
-        initialH: table.height,
-        containerW: containerRect.width,
-        containerH: containerRect.height,
-        offsetX: e.clientX - tableRect.left,
-        offsetY: e.clientY - tableRect.top
-    };
-    setActiveInteractionId(table.id);
-  };
-
-  const handleResizeStart = (e: React.MouseEvent, table: TableData) => {
-      e.stopPropagation();
-      e.preventDefault(); 
-      dragState.current = {
-        activeId: table.id,
-        mode: 'resize',
-        startX: e.clientX,
-        startY: e.clientY,
-        initialX: table.x,
-        initialY: table.y,
-        initialW: table.width,
-        initialH: table.height,
-        containerW: 0, 
-        containerH: 0,
-        offsetX: 0,
-        offsetY: 0
-      };
+      e.stopPropagation(); 
+      if (!containerRef.current) return; 
+      
+      const containerRect = containerRef.current.getBoundingClientRect(); 
+      const tableRect = e.currentTarget.getBoundingClientRect(); 
+      
+      dragState.current = { 
+          activeId: table.id, 
+          mode: 'move', 
+          startX: e.clientX, 
+          startY: e.clientY, 
+          initialX: table.x, 
+          initialY: table.y, 
+          initialW: table.width, 
+          initialH: table.height, 
+          containerW: containerRect.width, 
+          containerH: containerRect.height, 
+          offsetX: e.clientX - tableRect.left, 
+          offsetY: e.clientY - tableRect.top,
+      }; 
+      setEditingTableId(table.id);
       setActiveInteractionId(table.id);
   };
-
-  const handleSaveLayout = async () => {
-      const dbTables = tables.map(t => ({ id: t.id, label: t.label, shape: t.shape, x: t.x, y: t.y, width: t.width, height: t.height, seats: t.seats }));
-      const { error } = await supabase.from('tables').upsert(dbTables);
-      if (!error) { setIsEditMode(false); alert("Layout saved!"); }
+  
+  const handleBackgroundClick = () => { 
+      if (isEditMode) { setEditingTableId(null); } else { setSelectedTableId(null); } 
+  };
+  
+  const handleResizeStart = (e: React.MouseEvent, table: TableData) => { 
+      e.stopPropagation(); e.preventDefault(); 
+      if (!isEditMode) return; 
+      dragState.current = { activeId: table.id, mode: 'resize', startX: e.clientX, startY: e.clientY, initialX: table.x, initialY: table.y, initialW: table.width, initialH: table.height, containerW: 0, containerH: 0, offsetX: 0, offsetY: 0 }; 
+      setActiveInteractionId(table.id); 
   };
 
-  const handleAddTable = async (template?: any) => {
-    let nextNum = tables.length + 1;
-    let label = `T-${nextNum}`;
-    while (!checkLabelUnique(label)) {
-        nextNum++;
-        label = `T-${nextNum}`;
-    }
-    const newId = `T-${Math.floor(Math.random() * 10000)}`;
-    const defaults = template || { label: 'New', shape: 'square', width: 100, height: 100, seats: 4 };
-    if (defaults.label !== 'New' && !checkLabelUnique(defaults.label)) {
-        return; 
-    }
-    const newTable = { 
-        id: newId, 
-        label: defaults.label === 'New' ? label : defaults.label, 
-        shape: defaults.shape, 
-        x: 45, y: 45, 
-        width: defaults.width, height: defaults.height, 
-        seats: defaults.seats 
-    };
-    setTables(prev => [...prev, { ...newTable, status: 'Available', guests: 0, items: [] } as TableData]);
-    await supabase.from('tables').insert([newTable]);
-  };
-
-  const handleDeleteTable = async (id: string, e?: React.MouseEvent) => {
-    if (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.nativeEvent.stopImmediatePropagation();
-    }
-    const tableToDelete = tables.find(t => t.id === id);
-    if (!tableToDelete) return;
-    if (!window.confirm(`Are you sure you want to delete table "${tableToDelete.label}"?`)) return;
-    if (tableToDelete.status === 'Occupied') {
-        alert("Cannot delete an occupied table! Please complete or cancel active orders first.");
-        return;
-    }
-    const { error } = await supabase.from('tables').delete().eq('id', id);
-    if (error) {
-        alert(`FAILED to delete: ${error.message}`);
-        return;
-    }
-    if (dragState.current.activeId === id) {
-        dragState.current = { activeId: null, mode: null, startX: 0, startY: 0, initialX: 0, initialY: 0, initialW: 0, initialH: 0, containerW: 0, containerH: 0, offsetX: 0, offsetY: 0 };
-        setActiveInteractionId(null);
-    }
-    setTables(prev => prev.filter(t => t.id !== id));
-    setSelectedTableId(null);
-    setEditingTableId(null);
-  };
-
-  const handleUpdateTableProps = (id: string, field: keyof TableData, value: any) => {
-    if (field === 'label') {
-        if (!checkLabelUnique(value, id)) return;
-    }
-    setTables(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
-    if (field === 'label' || field === 'seats' || field === 'shape') {
-        supabase.from('tables').update({ [field]: value }).eq('id', id);
-    }
-  };
-
-  // ... (Giữ nguyên logic Order) ...
-  const handleOpenNewOrder = () => {
-    if (!selectedTableId) { alert("Please select a table first."); return; }
-    const table = tables.find(t => t.id === selectedTableId);
-    if (table && table.items.length > 0) {
-        setCurrentOrderItems([...table.items]);
-        setGuestCount(table.guests || 2);
-    } else {
-        setCurrentOrderItems([]);
-        setGuestCount(table?.guests || 2);
-    }
-    setShowMenuModal(true);
-  };
-
-  const handleAddToOrder = (item: MenuItem) => {
-    setCurrentOrderItems(prev => {
-        const existing = prev.find(i => i.id === item.id);
-        if (existing) return prev.map(i => i.id === item.id ? { ...i, qty: i.qty + 1 } : i);
-        return [...prev, { id: item.id, name: item.name, price: item.price, qty: 1, isNew: true }];
-    });
-  };
-
-  const handleUpdateOrderQty = (id: number, delta: number) => {
-    setCurrentOrderItems(prev => prev.map(item => {
-      if (item.id === id) {
-        return { ...item, qty: Math.max(1, item.qty + delta) };
-      }
-      return item;
-    }));
-  };
-
-  const handleRemoveFromOrder = (id: number) => {
-    setCurrentOrderItems(prev => prev.filter(item => item.id !== id));
-  };
-
-  const handleConfirmOrder = async () => {
-      if (!selectedTableId) return;
-      const table = tables.find(t => t.id === selectedTableId);
-      const totalAmount = calculateTotal(currentOrderItems);
-      const orderId = table?.orderId || `#${Date.now().toString().slice(-6)}`;
+  const handleUpdateGuestCount = async (delta: number) => {
+      const newCount = Math.max(1, guestCount + delta);
+      setGuestCount(newCount);
       
-      if (!table?.orderId) {
+      if (selectedTable?.status === 'Occupied' && selectedTable.orderId) {
+          await supabase.from('orders').update({ guests: newCount }).eq('id', selectedTable.orderId);
+          fetchTables(); 
+      }
+  };
+
+  const handleSaveAllChanges = async () => { 
+      if (!hasUnsavedChanges) { setIsEditMode(false); setEditingTableId(null); return; }
+      setIsSaving(true);
+      try {
+          const updates = tables.map(t => ({ id: t.id, label: t.label, x: t.x, y: t.y, width: t.width, height: t.height, shape: t.shape, seats: t.seats }));
+          const { error } = await supabase.from('tables').upsert(updates);
+          if (error) throw error;
+          setHasUnsavedChanges(false); setIsEditMode(false); setEditingTableId(null);
+      } catch (e: any) { alert("Failed to save layout: " + e.message); } finally { setIsSaving(false); }
+  };
+
+  const handleAddTable = async (template?: any) => { 
+      let nextNum = tables.length + 1; let label = `T-${nextNum}`; 
+      while (tables.some(t => t.label === label)) { nextNum++; label = `T-${nextNum}`; } 
+      const newId = `T-${Date.now()}`; const defaults = template || { label: 'New', shape: 'square', width: 100, height: 100, seats: 4 }; 
+      const newTable = { id: newId, label: defaults.label === 'New' ? label : defaults.label, shape: defaults.shape, x: 45, y: 45, width: defaults.width, height: defaults.height, seats: defaults.seats, status: 'Available', guests: 0, items: [] } as TableData; 
+      setTables(prev => [...prev, newTable]); 
+      if (isEditMode) { setEditingTableId(newId); setHasUnsavedChanges(true); }
+  };
+  
+  const handleDeleteTable = async (id: string, e?: React.MouseEvent) => { 
+      if (e) { e.preventDefault(); e.stopPropagation(); } 
+      if (!window.confirm("Delete this table?")) return;
+      const tableToDelete = tables.find(t => t.id === id); if (!tableToDelete) return; 
+      if (tableToDelete.status === 'Occupied') { alert("Cannot delete occupied table!"); return; } 
+      const { error } = await supabase.from('tables').delete().eq('id', id); if (error) { alert(`FAILED: ${error.message}`); return; } 
+      setTables(prev => prev.filter(t => t.id !== id)); if (editingTableId === id) setEditingTableId(null); setSelectedTableId(null); 
+  };
+  
+  const handleUpdateTableProps = (id: string, field: keyof TableData, value: any, e?: React.MouseEvent) => { 
+      if (e) { e.preventDefault(); e.stopPropagation(); }
+      setTables(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t)); setHasUnsavedChanges(true);
+  };
+
+  const handleOpenNewOrder = () => { 
+      if (!selectedTableId) return; 
+      const table = tables.find(t => t.id === selectedTableId); 
+      if (table && table.items.length > 0) { 
+          setCurrentOrderItems([...table.items]); 
+      } else { 
+          setCurrentOrderItems([]); 
+      } 
+      setShowMenuModal(true); 
+  };
+
+  const handleAddToOrder = (item: MenuItem) => { setCurrentOrderItems(prev => { const existing = prev.find(i => i.id === item.id); if (existing) return prev.map(i => i.id === item.id ? { ...i, qty: i.qty + 1 } : i); return [...prev, { id: item.id, name: item.name, price: item.price, qty: 1, isNew: true }]; }); };
+  const handleUpdateOrderQty = (id: number, delta: number) => { setCurrentOrderItems(prev => prev.map(item => { if (item.id === id) { return { ...item, qty: Math.max(1, item.qty + delta) }; } return item; })); };
+  const handleRemoveFromOrder = (id: number) => { setCurrentOrderItems(prev => prev.filter(item => item.id !== id)); };
+  
+  const handleConfirmOrder = async () => { 
+      if (!selectedTableId) return; 
+      const table = tables.find(t => t.id === selectedTableId); 
+      const totalAmount = calculateTotal(currentOrderItems); 
+      const orderId = table?.orderId || `#${Date.now().toString().slice(-6)}`; 
+      
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!table?.orderId) { 
           if (currentOrderItems.length === 0) return; 
-          const { data: { user } } = await supabase.auth.getUser();
           const { error } = await supabase.from('orders').insert([{ 
               id: orderId, 
               table_id: selectedTableId, 
@@ -440,287 +318,502 @@ export const FloorPlan: React.FC = () => {
               staff_name: user?.user_metadata?.full_name || 'Current Staff', 
               user_id: user?.id, 
               guests: guestCount 
-          }]);
-          if (error) { alert("Failed to create order"); return; }
-      } else {
-           await supabase.from('orders').update({ total_amount: totalAmount, guests: guestCount }).eq('id', orderId);
-           await supabase.from('order_items').delete().eq('order_id', orderId);
-      }
-      
-      if (currentOrderItems.length > 0) {
-        const orderItemsDb = currentOrderItems.map(i => ({ order_id: orderId, menu_item_id: i.id, quantity: i.qty, price: i.price }));
-        const { error: itemsError } = await supabase.from('order_items').insert(orderItemsDb);
-        if (itemsError) console.error(itemsError);
-      }
-      
+          }]); 
+          if (error) { alert("Failed"); return; } 
+      } else { 
+          await supabase.from('orders').update({ total_amount: totalAmount, guests: guestCount }).eq('id', orderId); 
+          await supabase.from('order_items').delete().eq('order_id', orderId); 
+      } 
+      if (currentOrderItems.length > 0) { 
+          const orderItemsDb = currentOrderItems.map(i => ({ order_id: orderId, menu_item_id: i.id, quantity: i.qty, price: i.price })); 
+          await supabase.from('order_items').insert(orderItemsDb); 
+      } 
       await fetchTables(); 
       setShowMenuModal(false); 
+      setSelectedTableId(null); 
+  };
+  
+  const handleOpenPayment = () => { 
+      if (!selectedTableId || !selectedTable?.orderId) return; 
+      setShowPaymentModal(true); 
   };
 
-  const handleOpenPayment = () => {
-      if (!selectedTableId || !selectedTable?.orderId) return;
-      setPaymentMethod('Cash');
-      setShowPaymentModal(true);
-  };
-
-  // --- HÀM THANH TOÁN (Logic đã đúng) ---
-  const handleConfirmPayment = async () => {
-      if (!selectedTable?.orderId) return;
+  const handlePaymentConfirm = async (method: 'Cash' | 'Card' | 'Transfer', shouldPrint: boolean) => {
+      if (!selectedTable || !selectedTable.orderId) return;
+      setIsProcessingPayment(true);
       try {
-          // BƯỚC 1: Xử lý thanh toán dưới database
-          await processOrderCompletion(selectedTable.orderId, paymentMethod);
-
-          // BƯỚC 2: KIỂM TRA VÀ IN HÓA ĐƠN
-          if (autoPrintBill) {
-              console.log(`Đang in hóa đơn cho Order #${selectedTable.orderId}...`);
-              // Thực hiện lệnh in (ví dụ: window.print())
+          await processOrderCompletion(selectedTable.orderId, method);
+          
+          if (shouldPrint) {
+              const fullOrder = {
+                  id: selectedTable.orderId,
+                  table: selectedTable.label,
+                  staff: selectedTable.waiter || 'Staff',
+                  items: selectedTable.items,
+                  total: calculateTotal(selectedTable.items),
+                  created_at: new Date().toISOString(),
+                  payment_method: method
+              };
+              printOrderReceipt(fullOrder);
           }
-
-          // BƯỚC 3: Đóng modal và làm mới dữ liệu
+          
           setShowPaymentModal(false);
           setSelectedTableId(null);
           await fetchTables();
-      } catch (error) {
-          console.error(error);
-          alert("Error processing payment.");
+      } catch (error: any) {
+          alert("Payment failed: " + error.message);
+      } finally {
+          setIsProcessingPayment(false);
       }
   };
-    
-  // ... (Giữ nguyên logic Transfer) ...
-  const handleOpenTransferModal = () => {
+
+  const handleOpenTransfer = () => {
       if (!selectedTableId) return;
       setShowTransferModal(true);
   };
 
-  const handleTransferMerge = async (targetTable: TableData) => {
-    if (!selectedTable || !selectedTable.orderId) return;
-    setLoading(true);
-    try {
-        if (targetTable.status === 'Available') {
-            const { error } = await supabase.from('orders').update({ table_id: targetTable.id }).eq('id', selectedTable.orderId);
-            if (error) throw error;
-        } else if (targetTable.status === 'Occupied' && targetTable.orderId) {
-            const sourceOrderId = selectedTable.orderId;
-            const targetOrderId = targetTable.orderId;
-            const sourceTotal = selectedTable.orderTotal || 0;
-            const targetTotal = targetTable.orderTotal || 0;
-            const { error: itemsError } = await supabase.from('order_items').update({ order_id: targetOrderId }).eq('order_id', sourceOrderId);
-            if (itemsError) throw itemsError;
-            const { error: updateError } = await supabase.from('orders').update({ total_amount: sourceTotal + targetTotal }).eq('id', targetOrderId);
-            if (updateError) throw updateError;
-            const { error: deleteError } = await supabase.from('orders').delete().eq('id', sourceOrderId);
-            if (deleteError) throw deleteError;
-        }
-        setShowTransferModal(false);
-        setSelectedTableId(null);
-        await fetchTables();
-    } catch (error: any) {
-        alert('Operation failed: ' + error.message);
-    } finally {
-        setLoading(false);
-    }
+  const handleTransferConfirm = async (targetTableId: string, mode: 'move' | 'merge') => {
+      if (!selectedTable || !selectedTable.orderId) return;
+      setIsProcessingTransfer(true);
+      try {
+          if (mode === 'move') {
+              // MOVE LOGIC: Update order's table_id to target
+              const { error } = await supabase
+                .from('orders')
+                .update({ table_id: targetTableId })
+                .eq('id', selectedTable.orderId);
+              if (error) throw error;
+          } else {
+              // MERGE LOGIC:
+              // 1. Get target table order
+              const targetTable = tables.find(t => t.id === targetTableId);
+              if (!targetTable || !targetTable.orderId) throw new Error("Target table has no order to merge into");
+              
+              // 2. Move items from current order to target order
+              const { error: moveItemsError } = await supabase
+                .from('order_items')
+                .update({ order_id: targetTable.orderId })
+                .eq('order_id', selectedTable.orderId);
+              if (moveItemsError) throw moveItemsError;
+
+              // 3. Update target order total
+              const newTotal = (targetTable.orderTotal || 0) + (selectedTable.orderTotal || 0);
+              await supabase.from('orders').update({ total_amount: newTotal }).eq('id', targetTable.orderId);
+
+              // 4. Delete current order (empty shell)
+              await supabase.from('orders').delete().eq('id', selectedTable.orderId);
+          }
+          
+          await fetchTables();
+          setShowTransferModal(false);
+          setSelectedTableId(null);
+      } catch (error: any) {
+          alert(`Transfer failed: ${error.message}`);
+      } finally {
+          setIsProcessingTransfer(false);
+      }
   };
 
   const filteredMenu = menuItems.filter(item => (menuCategory === 'All' || item.category === menuCategory) && item.name.toLowerCase().includes(menuSearch.toLowerCase()));
-  const availableTargets = tables.filter(t => t.id !== selectedTableId && t.id !== 'Takeaway' && t.id !== 'Counter');
+
+  const getTableClasses = (t: TableData, isSelected: boolean) => {
+    let classes = `absolute flex flex-col items-center justify-center transition-all select-none rounded-2xl `;
+    classes += isEditMode ? 'cursor-move ' : 'cursor-pointer ';
+    if (t.status === 'Available') {
+        classes += "bg-[#f8fafc] border-2 border-dashed border-[#cbd5e1] text-[#64748b] shadow-sm hover:border-[#10B981] hover:text-[#10B981] hover:shadow-md hover:bg-white ";
+        classes += "dark:bg-[#1a2c26]/40 dark:border-[#19e6a2]/30 dark:text-[#93c8b6] dark:hover:border-[#19e6a2] dark:hover:bg-[#19e6a2]/10 ";
+    } else {
+        classes += "bg-white border-2 border-[#10B981] text-[#065f46] shadow-[0_8px_24px_rgba(16,185,129,0.25)] ";
+        classes += "dark:bg-[#052e16] dark:border-[#19e6a2] dark:text-white dark:shadow-[0_0_20px_rgba(25,230,162,0.15)] ";
+    }
+    if (isEditMode && editingTableId === t.id) {
+        classes = `absolute flex flex-col items-center justify-center rounded-2xl bg-white/90 dark:bg-[#1a2c26]/80 border-2 border-primary shadow-[0_0_15px_rgba(16,185,129,0.3)] dark:shadow-[0_0_15px_rgba(25,230,162,0.3)] z-20 cursor-move text-primary select-none`;
+    }
+    if (isSelected) {
+        classes += "ring-2 ring-offset-2 ring-[#10B981] ring-offset-[#F8FAFC] dark:ring-offset-[#0d1815] z-30 scale-105 ";
+    }
+    if (activeInteractionId === t.id) {
+        classes += ' z-50 shadow-2xl scale-[1.02] ';
+    }
+    return classes;
+  };
 
   if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin text-primary" size={48} /></div>;
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#0d1815] overflow-hidden">
-      {/* ... (Phần Header giữ nguyên) ... */}
-      <header className="h-16 flex items-center justify-between px-6 border-b border-border bg-background shrink-0">
+    <div className="flex-1 flex flex-col h-full overflow-hidden relative transition-colors bg-background">
+      <header className="h-16 flex items-center justify-between px-4 lg:px-6 border-b border-border bg-background shrink-0 z-30">
         <div className="flex items-center gap-4">
-          <h2 className="text-white text-xl font-bold">Main Hall</h2>
-          {isEditMode ? <div className="flex items-center gap-2 text-orange-500 bg-orange-500/10 px-3 py-1 rounded-full border border-orange-500/20"><Layout size={16} /><span className="text-xs font-bold uppercase">Editor</span></div> : <div className="flex items-center gap-2 text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20"><span className="block size-2 rounded-full bg-primary animate-pulse"></span><span className="text-xs font-bold uppercase">Live</span></div>}
+          <h2 className="text-text-main text-lg lg:text-xl font-bold">{t('Main Hall')}</h2>
+          {isEditMode ? 
+             <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20"><Layout size={16} /><span className="text-xs font-bold uppercase hidden sm:inline">{t('Editor Mode')}</span></div>
+                {hasUnsavedChanges && <div className="text-primary text-xs font-bold animate-pulse flex items-center gap-1"><AlertTriangle size={12}/> Unsaved</div>}
+             </div>
+             : 
+             <div className="flex items-center gap-2 text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20"><span className="block size-2 rounded-full bg-primary animate-pulse"></span><span className="text-xs font-bold uppercase hidden sm:inline">{t('Live')}</span></div>
+          }
         </div>
         <div className="flex items-center gap-4">
           {role === 'admin' && (
-             <button onClick={() => isEditMode ? handleSaveLayout() : setIsEditMode(true)} className={`flex items-center gap-2 px-4 h-10 rounded-lg text-sm font-bold transition-colors ${isEditMode ? 'bg-orange-500 hover:bg-orange-600 text-white' : 'bg-surface hover:bg-border text-white border border-border'}`}>{isEditMode ? <Save size={18} /> : <Layout size={18} />}<span>{isEditMode ? 'Save Layout' : 'Edit Layout'}</span></button>
+             <button 
+                onClick={() => isEditMode ? handleSaveAllChanges() : setIsEditMode(true)} 
+                disabled={isSaving}
+                className={`flex items-center gap-2 px-3 lg:px-4 h-9 lg:h-10 rounded-lg text-xs lg:text-sm font-bold transition-all
+                    ${isEditMode 
+                        ? (hasUnsavedChanges ? 'bg-primary hover:bg-primary-hover text-background shadow-lg shadow-primary/20' : 'bg-surface hover:bg-border text-text-main border border-border') 
+                        : 'bg-surface hover:bg-border text-text-main border border-border'
+                    }
+                `}
+             >
+                {isEditMode ? 
+                    (isSaving ? <><Loader2 size={18} className="animate-spin"/> {t('Save Changes')}...</> : <><Save size={18}/> {hasUnsavedChanges ? t('Save Changes') : t('Done')}</>) 
+                    : <><Layout size={18} /> {t('Edit Layout')}</>
+                }
+             </button>
           )}
-          {!isEditMode && <button onClick={handleOpenNewOrder} className="flex items-center gap-2 px-4 h-10 rounded-lg bg-primary hover:bg-primary-hover text-background text-sm font-bold transition-colors"><Plus size={20} /><span>New Order</span></button>}
         </div>
       </header>
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* ... (Phần Canvas vẽ bàn giữ nguyên) ... */}
-        <div ref={containerRef} onClick={handleBackgroundClick} className="flex-1 p-8 relative overflow-hidden custom-scrollbar select-none" style={{ backgroundImage: isEditMode ? 'linear-gradient(#3a5c50 1px, transparent 1px), linear-gradient(90deg, #3a5c50 1px, transparent 1px)' : 'linear-gradient(#24473b 1px, transparent 1px), linear-gradient(90deg, #24473b 1px, transparent 1px)', backgroundSize: '40px 40px', backgroundColor: '#0d1815' }}>
-            {tables.map(t => (
-                <div 
-                    key={t.id} 
-                    onMouseDown={(e) => handleMouseDownMove(e, t)}
-                    onClick={(e) => handleTableClick(e, t)}
-                    onDoubleClick={(e) => handleTableDoubleClick(e, t)}
-                    style={{ left: `${t.x}%`, top: `${t.y}%`, width: `${t.width}px`, height: `${t.height}px` }} 
-                    className={`absolute transition-colors duration-200 flex flex-col items-center justify-center border-2 shadow-lg backdrop-blur-sm z-0 
-                        ${t.shape === 'round' ? 'rounded-full' : 'rounded-xl'} 
-                        ${selectedTableId === t.id ? 'ring-4 ring-offset-2 ring-offset-background z-10' : ''} 
-                        ${(isEditMode || editingTableId === t.id) ? 'bg-surface/80 border-dashed border-orange-500/50 hover:border-orange-500 cursor-move' : t.status === 'Occupied' ? 'bg-surface/90 border-primary shadow-primary/10 ring-primary' : 'bg-surface/50 border-border border-dashed hover:border-secondary text-secondary cursor-pointer'}
-                        ${activeInteractionId === t.id ? 'z-50 shadow-2xl scale-[1.02]' : ''}
-                    `}
-                >
-                  
-                  {(isEditMode || editingTableId === t.id) && <div className="absolute inset-0 flex items-center justify-center opacity-0 hover:opacity-100 bg-black/40 rounded-inherit pointer-events-none"><Move className="text-white" size={24} /></div>}
-                  
-                  {!isEditMode && editingTableId !== t.id && t.status === 'Occupied' && <div className="absolute -top-3 flex items-center gap-1 bg-surface px-2 py-0.5 rounded-full border border-border shadow-sm"><span className={`size-2 rounded-full ${t.orderStatus === 'Ready' ? 'bg-green-500 animate-pulse' : t.orderStatus === 'Cooking' ? 'bg-orange-500' : 'bg-yellow-500'}`} /><span className="text-[10px] font-bold text-white uppercase">{t.orderStatus}</span></div>}
-                  
-                  <span className={`text-xl font-bold ${(t.status === 'Available' || isEditMode || editingTableId === t.id) ? 'text-secondary' : 'text-white'}`}>{t.label}</span>
-                  {!isEditMode && editingTableId !== t.id && t.status === 'Occupied' && <div className="mt-1 text-xs text-white font-bold bg-primary/20 px-2 py-0.5 rounded">{formatPrice(calculateTotal(t.items))}</div>}
+      <div className="flex-1 flex overflow-hidden relative">
+        <div 
+            ref={containerRef} 
+            onClick={handleBackgroundClick} 
+            className="flex-1 overflow-auto custom-scrollbar select-none relative" 
+            style={{ 
+                backgroundImage: 'linear-gradient(var(--color-grid) 1px, transparent 1px), linear-gradient(90deg, var(--color-grid) 1px, transparent 1px)', 
+                backgroundSize: '40px 40px', 
+                backgroundColor: 'var(--color-floor-bg)', 
+                minHeight: '1000px', 
+                minWidth: '1000px' 
+            }}
+        >
+            {tables.map(t => {
+                const isSelected = selectedTableId === t.id && !isEditMode;
+                return (
+                  <div 
+                      key={t.id} 
+                      onMouseDown={(e) => handleMouseDownDrag(e, t)}
+                      onClick={(e) => handleTableClick(e, t)}
+                      onDoubleClick={(e) => handleTableDoubleClick(e, t)}
+                      style={{ left: `${t.x}%`, top: `${t.y}%`, width: `${t.width}px`, height: `${t.height}px` }} 
+                      className={getTableClasses(t, isSelected)}
+                  >
+                    {(isEditMode && editingTableId === t.id) && <div className="absolute inset-0 flex items-center justify-center bg-black/10 rounded-inherit pointer-events-none"><Move className="text-primary opacity-50" size={32} /></div>}
+                    {!isEditMode && editingTableId !== t.id && t.status === 'Occupied' && <div className="absolute -top-3 flex items-center gap-1 bg-surface px-2 py-0.5 rounded-full border border-border shadow-sm"><span className={`size-2 rounded-full ${t.orderStatus === 'Ready' ? 'bg-green-500 animate-pulse' : t.orderStatus === 'Cooking' ? 'bg-primary' : 'bg-yellow-500'}`} /><span className="text-[10px] font-bold text-text-main uppercase">{t.orderStatus}</span></div>}
+                    
+                    <span className={`text-xl font-bold`}>{t.label}</span>
+                    
+                    {!isEditMode && t.status === 'Occupied' && <div className="mt-1 text-xs font-bold bg-black/10 px-2 py-0.5 rounded text-current">{formatPrice(calculateTotal(t.items))}</div>}
+                    {isEditMode && editingTableId === t.id && ( 
+                        <div 
+                            className="absolute bottom-0 right-0 z-20 p-1 cursor-nwse-resize text-primary hover:bg-primary/20 rounded-tl" 
+                            onMouseDown={(e) => handleResizeStart(e, t)}
+                        >
+                            <Maximize2 size={20} strokeWidth={2.5} />
+                        </div> 
+                    )}
+                  </div>
+                );
+            })}
 
-                  {editingTableId === t.id && (
-                      <>
-                        <button onMouseDown={(e) => e.stopPropagation()} onClick={(e) => handleDeleteTable(t.id, e)} className="absolute -top-3 -right-3 p-1.5 bg-red-500 text-white rounded-full shadow-md hover:bg-red-600 transition-colors z-[9999] cursor-pointer pointer-events-auto" title="Delete Table"><Trash2 size={14} strokeWidth={3} /></button>
-                        <div className="absolute bottom-1 right-1 cursor-nwse-resize text-orange-500 z-20 p-1 hover:bg-orange-500/20 rounded" onMouseDown={(e) => handleResizeStart(e, t)}><Scaling size={20} /></div>
-                      </>
-                  )}
+            {/* --- ACTION PANEL (Smart Position & Responsive) --- */}
+            {!isEditMode && selectedTable && (
+               <div 
+                 onClick={(e) => e.stopPropagation()}
+                 className={`
+                    z-50 animate-in duration-200
+                    fixed bottom-0 left-0 right-0 w-full rounded-t-2xl border-t border-primary/20 shadow-[0_-10px_40px_rgba(0,0,0,0.2)] pb-safe slide-in-from-bottom
+                    lg:absolute lg:bottom-auto lg:left-auto lg:right-auto lg:w-auto lg:rounded-2xl lg:border lg:shadow-2xl lg:pb-0 lg:zoom-in-95
+                 `}
+                 style={
+                    window.innerWidth >= 1024 ? {
+                        top: `${selectedTable.y}%`,
+                        // 30/70 Rule for Positioning
+                        // If x < 30%, show on RIGHT side
+                        left: selectedTable.x < 30
+                            ? `calc(${selectedTable.x}% + ${selectedTable.width}px + 12px)`
+                            : 'auto',
+                        // If x >= 30%, show on LEFT side (calculated from right edge)
+                        right: selectedTable.x >= 30
+                            ? `calc((100% - ${selectedTable.x}%) + 12px)`
+                            : 'auto'
+                    } : {}
+                 }
+               >
+                 <div className="bg-surface/95 dark:bg-[#1a2c26]/95 backdrop-blur-xl p-4 lg:min-w-[300px] flex flex-col gap-4 lg:rounded-2xl">
+                    {/* Mobile Handle */}
+                    <div className="lg:hidden w-12 h-1.5 bg-border rounded-full mx-auto -mt-2 mb-2" />
+                    
+                    {/* Header */}
+                    <div className="flex justify-between items-center pb-3 border-b border-border/50">
+                        <div>
+                           <h3 className="text-xl font-bold text-text-main">{selectedTable.label}</h3>
+                           <p className="text-xs text-secondary font-medium">{t(selectedTable.status)} • {selectedTable.timeElapsed || '0m'}</p>
+                        </div>
+                        <span className={`size-3 rounded-full ${selectedTable.status === 'Occupied' ? 'bg-primary shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-secondary/50'}`}></span>
+                    </div>
 
-                  {!isEditMode && !editingTableId && selectedTableId === t.id && t.status === 'Occupied' && (
-                      <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 w-72 bg-[#1a2c26] border border-cyan-500/50 rounded-xl shadow-2xl z-50 animate-in fade-in zoom-in-95 duration-200 cursor-default" onClick={(e) => e.stopPropagation()} style={{ marginTop: '12px' }}>
-                          <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-[#1a2c26] border-t border-l border-cyan-500/50 rotate-45 transform" />
-                          <div className="p-4 relative z-10">
-                            <div className="flex justify-between items-start mb-3"><div><h4 className="font-bold text-white text-lg leading-none">{t.orderId}</h4><div className="flex items-center gap-1.5 text-xs text-gray-400 mt-1"><User size={12} /><span>Khách: {t.guests}</span></div></div><span className="bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider">ĐANG PHỤC VỤ</span></div>
-                            <div className="h-px bg-cyan-500/20 my-3" />
-                            <div className="flex justify-between items-end mb-4"><span className="text-gray-400 text-sm font-medium">Tạm tính:</span><span className="text-xl font-bold text-white">{formatPrice(calculateTotal(t.items))}</span></div>
-                            <div className="space-y-2.5"><div className="grid grid-cols-2 gap-2.5"><button onClick={handleOpenNewOrder} className="h-9 rounded-lg bg-surface border border-border text-white text-xs font-bold hover:bg-border transition-colors flex items-center justify-center gap-1.5 shadow-sm"><Plus size={14} /> Thêm món</button><button onClick={handleOpenPayment} className="h-9 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-bold transition-colors flex items-center justify-center gap-1.5 shadow-lg shadow-cyan-900/20"><CreditCard size={14} /> Thanh toán</button></div><button onClick={handleOpenTransferModal} className="w-full h-8 rounded-lg border border-dashed border-gray-600 text-gray-400 hover:text-white hover:border-gray-500 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors"><ArrowRightLeft size={12} /> Chuyển / Ghép bàn</button></div>
-                          </div>
-                      </div>
-                  )}
-                </div>
-            ))}
+                    {/* Guest Control */}
+                    <div className="flex items-center justify-between bg-background/50 p-2 rounded-xl border border-border/50">
+                        <span className="text-xs font-bold text-secondary uppercase ml-1">{t('Guests')}</span>
+                        <div className="flex items-center gap-3">
+                           <button onClick={() => handleUpdateGuestCount(-1)} className="size-8 rounded-lg bg-surface border border-border flex items-center justify-center hover:border-primary hover:text-primary transition-colors"><Minus size={16}/></button>
+                           <span className="font-bold text-lg w-4 text-center text-text-main">{guestCount}</span>
+                           <button onClick={() => handleUpdateGuestCount(1)} className="size-8 rounded-lg bg-surface border border-border flex items-center justify-center hover:border-primary hover:text-primary transition-colors"><Plus size={16}/></button>
+                        </div>
+                    </div>
+                    
+                    {/* Active Order Preview */}
+                    {selectedTable.items.length > 0 && (
+                        <div className="max-h-[120px] overflow-y-auto custom-scrollbar bg-background/30 rounded-lg p-2 space-y-1">
+                           {selectedTable.items.map((item, idx) => (
+                               <div key={idx} className="flex justify-between text-xs">
+                                   <span className="text-text-main"><span className="font-bold">{item.qty}x</span> {typeof item.name === 'string' ? item.name : 'Item'}</span>
+                                   <span className="font-bold text-text-main">{formatPrice(item.price * item.qty)}</span>
+                               </div>
+                           ))}
+                           <div className="border-t border-border/30 pt-1 mt-1 flex justify-between font-bold text-sm text-primary">
+                               <span>{t('Total')}</span>
+                               <span>{formatPrice(calculateTotal(selectedTable.items))}</span>
+                           </div>
+                        </div>
+                    )}
+
+                    {/* Main Actions */}
+                    <div className="grid grid-cols-2 gap-3">
+                        <button 
+                            onClick={handleOpenNewOrder} 
+                            className={`h-12 bg-surface hover:bg-background border border-border hover:border-primary text-text-main rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-sm ${selectedTable.status === 'Occupied' ? 'col-span-1' : 'col-span-2'}`}
+                        >
+                            <Plus size={18} className="text-primary" /> {t('Add Items')}
+                        </button>
+                        
+                        {/* Only show Pay and Split/Merge if the table is Occupied */}
+                        {selectedTable.status === 'Occupied' && (
+                            <>
+                                <button 
+                                    onClick={handleOpenPayment} 
+                                    disabled={selectedTable.items.length === 0}
+                                    className="col-span-1 h-12 bg-primary hover:bg-primary-hover text-background rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-primary/20 disabled:opacity-50 disabled:shadow-none"
+                                >
+                                    <CreditCard size={18} /> {t('Pay')}
+                                </button>
+                                <button onClick={handleOpenTransfer} className="col-span-2 h-9 bg-transparent border border-border/50 text-secondary hover:text-text-main hover:bg-surface rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all">
+                                    <ArrowRightLeft size={14} /> {t('Split / Merge Table')}
+                                </button>
+                            </>
+                        )}
+                    </div>
+                 </div>
+               </div>
+            )}
+
+            {/* --- EDITOR TOOLBAR (Restored) --- */}
+            {isEditMode && activeEditingTable && (
+               <div 
+                 style={{ 
+                   left: `${activeEditingTable.x}%`, 
+                   top: `${activeEditingTable.y}%`,
+                   width: `${activeEditingTable.width}px`,
+                   height: `${activeEditingTable.height}px`
+                 }} 
+                 className="absolute z-50 pointer-events-none"
+               >
+                 <div 
+                   onMouseDown={(e) => e.stopPropagation()}
+                   onClick={(e) => e.stopPropagation()}
+                   className={`pointer-events-auto absolute left-1/2 -translate-x-1/2 w-[240px] bg-surface/95 backdrop-blur-md border border-primary/20 rounded-xl shadow-2xl p-3 flex flex-col gap-3 animate-in zoom-in-95 duration-200
+                     ${activeEditingTable.y < 50 ? 'top-[105%] origin-top' : 'bottom-[105%] origin-bottom'}
+                   `}
+                 >
+                    <div className="flex items-center gap-2 pb-2 border-b border-primary/20">
+                        <Type size={16} className="text-secondary" />
+                        <input 
+                          type="text" 
+                          value={activeEditingTable.label}
+                          onChange={(e) => handleUpdateTableProps(activeEditingTable.id, 'label', e.target.value)}
+                          className="flex-1 bg-transparent border-b border-secondary/20 text-text-main font-bold text-sm focus:border-primary outline-none px-1 py-0.5 placeholder-secondary/50"
+                          placeholder="Name"
+                        />
+                        <button onClick={(e) => handleDeleteTable(activeEditingTable.id, e)} className="text-red-500 hover:text-white hover:bg-red-500 p-1.5 rounded transition-colors"><Trash2 size={16}/></button>
+                    </div>
+
+                    <div>
+                        <span className="text-[10px] uppercase font-bold text-secondary mb-1 block">{t('Shape')}</span>
+                        <div className="flex gap-1 bg-background/50 p-1 rounded-lg border border-primary/10">
+                            {[
+                            { val: 'square', icon: Square },
+                            { val: 'round', icon: Circle },
+                            { val: 'rect', icon: RectangleHorizontal }
+                            ].map((opt) => (
+                            <button 
+                                key={opt.val}
+                                onClick={(e) => handleUpdateTableProps(activeEditingTable.id, 'shape', opt.val, e)}
+                                className={`flex-1 flex items-center justify-center py-1.5 rounded-md transition-all ${activeEditingTable.shape === opt.val ? 'bg-primary text-background shadow-sm' : 'text-secondary hover:text-primary hover:bg-primary/10'}`}
+                            >
+                                <opt.icon size={16} />
+                            </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    <div>
+                        <span className="text-[10px] uppercase font-bold text-secondary mb-1 block">{t('Seats')}</span>
+                        <div className="flex items-center justify-between bg-background/50 p-1.5 rounded-lg px-2 border border-primary/10">
+                            <span className="text-xs font-bold text-secondary flex items-center gap-1"><Users size={12}/> {t('Guests')}</span>
+                            <div className="flex items-center gap-3">
+                                <button onClick={(e) => handleUpdateTableProps(activeEditingTable.id, 'seats', Math.max(1, activeEditingTable.seats - 1), e)} className="size-6 flex items-center justify-center rounded bg-background border border-primary/20 text-text-main hover:bg-primary hover:text-background transition-colors"><Minus size={14}/></button>
+                                <span className="text-sm font-bold text-text-main w-4 text-center">{activeEditingTable.seats}</span>
+                                <button onClick={(e) => handleUpdateTableProps(activeEditingTable.id, 'seats', activeEditingTable.seats + 1, e)} className="size-6 flex items-center justify-center rounded bg-background border border-primary/20 text-text-main hover:bg-primary hover:text-background transition-colors"><Plus size={14}/></button>
+                            </div>
+                        </div>
+                    </div>
+                 </div>
+               </div>
+            )}
         </div>
 
-        {/* SIDEBAR */}
-        <aside className="w-96 bg-background border-l border-border flex flex-col shadow-2xl z-20 transition-all">
-          {(isEditMode || editingTableId) ? (
-               <div className="flex-1 overflow-y-auto p-6 space-y-6">
-                 {(editingTableId || selectedTableId) ? (() => {
-                     const activeEditTable = tables.find(t => t.id === (editingTableId || selectedTableId));
-                     if (!activeEditTable) return null;
-                     return (
-                       <div className="space-y-4 animate-in slide-in-from-right duration-200">
-                          <div className="flex justify-between items-center"><div><h4 className="font-bold text-white text-lg">Edit Table</h4><p className="text-xs text-secondary">ID: {activeEditTable.id}</p></div><button onClick={() => { setEditingTableId(null); setSelectedTableId(null); }} className="text-xs text-secondary hover:text-white underline mr-4">Close</button></div>
-                          <div className="space-y-4 p-5 bg-surface rounded-xl border border-border"><div className="space-y-2"><label className="text-[10px] text-secondary uppercase font-bold tracking-wider">Label (Must be Unique)</label><input type="text" value={activeEditTable.label} onChange={(e) => handleUpdateTableProps(activeEditTable.id, 'label', e.target.value)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-white text-sm outline-none focus:border-primary" /></div><div className="grid grid-cols-2 gap-3"><div className="space-y-2"><label className="text-[10px] text-secondary uppercase font-bold tracking-wider">Seats</label><input type="number" value={activeEditTable.seats} onChange={(e) => handleUpdateTableProps(activeEditTable.id, 'seats', parseInt(e.target.value))} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-white text-sm outline-none" /></div><div className="space-y-2"><label className="text-[10px] text-secondary uppercase font-bold tracking-wider">Shape</label><select value={activeEditTable.shape} onChange={(e) => handleUpdateTableProps(activeEditTable.id, 'shape', e.target.value)} className="w-full bg-background border border-border rounded-lg px-3 py-2 text-white text-sm outline-none"><option value="rect">Rectangle</option><option value="square">Square</option><option value="round">Round</option></select></div></div></div>
-                          <button onClick={() => handleDeleteTable(activeEditTable.id)} className="w-full py-3 bg-red-500/10 text-red-500 border border-red-500/20 hover:bg-red-500 hover:text-white rounded-lg transition-colors flex items-center justify-center gap-2 font-bold"><Trash2 size={18} /> Delete Table</button>
-                       </div>
-                     );
-                 })() : (
-                   <div className="space-y-4"><h4 className="font-bold text-white text-sm uppercase tracking-wider">Add Table Template</h4><div className="grid grid-cols-2 gap-3">{TABLE_TEMPLATES.map((tpl, idx) => (<button key={idx} onClick={() => handleAddTable(tpl)} className="flex flex-col items-center justify-center gap-2 p-4 bg-surface border border-border hover:border-orange-500 hover:bg-surface/80 rounded-xl transition-all group"><div className="text-secondary group-hover:text-orange-500"><tpl.icon size={28} strokeWidth={1.5} /></div><div className="text-center"><p className="text-xs font-bold text-white">{tpl.label}</p></div></button>))}</div><button onClick={() => handleAddTable()} className="w-full py-3 mt-4 rounded-xl border border-dashed border-secondary/50 text-secondary hover:text-white hover:border-white transition-all flex items-center justify-center gap-2 font-bold"><Plus size={20} /> Custom Empty Table</button></div>
-                 )}
-               </div>
-          ) : (
-            selectedTable ? (
-            <>
-              <div className="p-6 border-b border-border bg-surface">
-                <div className="flex justify-between items-start"><div><h3 className="text-2xl font-bold text-white mb-1">Table {selectedTable.label}</h3><span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${selectedTable.status === 'Occupied' ? 'bg-primary text-background' : 'bg-gray-600 text-white'}`}>{selectedTable.status}</span></div></div>
+        {isEditMode && (
+           <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center z-40 animate-in slide-in-from-bottom-10">
+              <div className="bg-surface/90 backdrop-blur-xl border border-primary/20 rounded-full px-6 py-3 shadow-2xl flex items-center gap-4">
+                  {TABLE_TEMPLATES.map((tpl, idx) => (
+                      <button key={idx} onClick={() => handleAddTable(tpl)} className="group relative flex flex-col items-center gap-1 transition-all hover:scale-110 active:scale-95">
+                         <div className="size-10 rounded-xl bg-background border border-primary/20 flex items-center justify-center text-secondary group-hover:text-primary group-hover:border-primary group-hover:bg-primary/10 transition-colors"><tpl.icon size={20} /></div>
+                         <span className="absolute -top-10 left-1/2 -translate-x-1/2 bg-surface px-2 py-1 rounded text-[10px] text-primary whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-primary/20">{tpl.label}</span>
+                      </button>
+                  ))}
+                  <div className="w-px h-8 bg-primary/20 mx-2"></div>
+                  <button onClick={() => handleAddTable()} className="size-10 rounded-full bg-primary text-background flex items-center justify-center hover:bg-primary-hover transition-all hover:scale-110 shadow-lg shadow-primary/20" title="Add Custom Table"><Plus size={24} /></button>
               </div>
-              {selectedTable.status === 'Occupied' ? (
-                <>
-                  <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-2">
-                      <div className="flex justify-between items-center px-2 mb-1"><span className="text-xs font-bold text-secondary uppercase">Guests</span><span className="text-xs font-bold text-white bg-surface border border-border px-2 py-0.5 rounded">{selectedTable.guests}</span></div>
-                      {selectedTable.items.map((item, i) => (<div key={i} className="flex items-center gap-3 p-3 rounded-lg bg-surface border border-border"><div className="size-6 bg-border rounded flex items-center justify-center text-xs font-bold">{item.qty}</div><div className="flex-1 text-sm font-medium text-white">{typeof item.name === 'string' ? item.name : 'Unknown'}</div><div className="text-sm font-bold text-white">{formatPrice(item.price * item.qty)}</div></div>))}
-                  </div>
-                  <div className="p-6 bg-surface border-t border-border space-y-4">
-                      <div className="flex justify-between items-end"><span className="text-secondary">Total</span><span className="text-2xl font-black text-primary">{formatPrice(calculateTotal(selectedTable.items))}</span></div>
-                      <div className="grid grid-cols-2 gap-3"><button onClick={handleOpenNewOrder} className="col-span-2 h-12 bg-primary text-background rounded-lg font-bold hover:bg-primary-hover flex items-center justify-center gap-2"><Plus size={18}/> Edit Order</button><button onClick={handleOpenPayment} className="h-10 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 flex items-center justify-center gap-2"><CreditCard size={16}/> Pay</button><button className="h-10 border border-border text-white rounded-lg font-bold hover:bg-border flex items-center justify-center gap-2"><Printer size={16}/> Bill</button></div>
-                  </div>
-                </>
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4"><div className="size-20 bg-surface border border-border rounded-full flex items-center justify-center text-secondary"><Armchair size={40} /></div><div><h3 className="text-white font-bold text-lg">Empty Table</h3><p className="text-secondary text-sm">Ready for service</p></div><button onClick={handleOpenNewOrder} className="w-full bg-primary text-background font-bold py-3 rounded-xl hover:bg-primary-hover shadow-lg shadow-primary/20 flex items-center justify-center gap-2"><ChefHat size={18}/> Check In & Order</button></div>
-              )}
-            </>
-          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-secondary"><p>Select a table to view details</p></div>
-          ))}
-        </aside>
+           </div>
+        )}
       </div>
 
-      {/* --- MENU MODAL (Giữ nguyên) --- */}
+      {/* --- MENU MODAL --- */}
       {showMenuModal && (
-          <div className="fixed inset-0 z-50 bg-background/95 flex animate-in slide-in-from-bottom-10 duration-200">
-              <div className="flex-1 flex flex-col border-r border-border">
-                  <div className="h-16 flex items-center justify-between px-6 border-b border-border"><h2 className="text-xl font-bold text-white flex items-center gap-2"><ShoppingBag className="text-primary" /> {selectedTable?.status === 'Occupied' ? 'Edit Order' : 'New Order'}</h2><div className="flex gap-2"><input value={menuSearch} onChange={e => setMenuSearch(e.target.value)} className="bg-surface border-none rounded-lg px-4 py-2 text-sm text-white w-64 focus:ring-1 focus:ring-primary" placeholder="Search menu..." /></div></div>
-                  <div className="p-4 flex gap-2 overflow-x-auto border-b border-border">{['All', 'Coffee', 'Non Coffee', 'Matcha', 'Food'].map(cat => (<button key={cat} onClick={() => setMenuCategory(cat)} className={`px-4 py-2 rounded-full text-sm font-bold ${menuCategory === cat ? 'bg-white text-background' : 'bg-surface text-secondary'}`}>{cat}</button>))}</div>
-                  <div className="flex-1 overflow-y-auto p-6 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 content-start">{filteredMenu.map(item => (<button key={item.id} onClick={() => handleAddToOrder(item)} disabled={item.stock <= 0} className={`bg-surface border border-border rounded-xl p-3 flex flex-col gap-2 hover:border-primary transition-all text-left ${item.stock <= 0 ? 'opacity-50 grayscale' : ''}`}><div className="aspect-square bg-background rounded-lg overflow-hidden relative">{item.image ? <img src={item.image} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xs">No Image</div>}{item.stock <= 0 && <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-xs font-bold text-red-500">SOLD OUT</div>}</div><div><h4 className="font-bold text-white text-sm line-clamp-1">{item.name}</h4><p className="text-primary font-bold text-sm">{formatPrice(item.price)}</p></div></button>))}</div>
-              </div>
-              <div className="w-96 bg-surface flex flex-col border-l border-border shadow-2xl">
-                  <div className="h-16 flex items-center justify-between px-6 border-b border-border bg-background/50"><div><h3 className="font-bold text-white">Order Items</h3></div><button onClick={() => setShowMenuModal(false)}><X size={20} className="text-secondary" /></button></div>
-                  <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                      <div className="bg-background rounded-lg p-3 border border-border mb-2"><div className="flex justify-between items-center mb-1"><span className="text-xs font-bold text-secondary uppercase">Guests</span><div className="flex items-center gap-3"><button onClick={() => setGuestCount(Math.max(1, guestCount - 1))} className="text-white hover:text-primary"><Minus size={14}/></button><span className="text-white font-bold">{guestCount}</span><button onClick={() => setGuestCount(guestCount + 1)} className="text-white hover:text-primary"><Plus size={14}/></button></div></div></div>
-                      {currentOrderItems.map(item => (<div key={item.id} className="bg-background rounded-lg p-3 flex items-center gap-3 border border-border"><div className="flex flex-col items-center gap-1"><button onClick={() => handleUpdateOrderQty(item.id, 1)}><Plus size={14}/></button><span className="font-bold text-white text-sm">{item.qty}</span><button onClick={() => handleUpdateOrderQty(item.id, -1)}><Minus size={14}/></button></div><div className="flex-1"><p className="text-white font-bold text-sm">{item.name}</p><p className="text-primary text-xs">{formatPrice(item.price)}</p></div><div className="text-right"><p className="text-white font-bold">{formatPrice(item.price * item.qty)}</p><button onClick={() => handleRemoveFromOrder(item.id)} className="text-secondary text-xs">Remove</button></div></div>))}
+          <div className="fixed inset-0 z-[60] bg-background flex flex-col animate-in slide-in-from-bottom-5 duration-200">
+              <div className="flex-1 flex overflow-hidden">
+                  {/* LEFT: MENU GRID */}
+                  <div className="w-full lg:w-[70%] flex flex-col border-r border-border">
+                       <div className="h-16 flex items-center justify-between px-6 border-b border-border bg-surface/50">
+                           <h2 className="text-xl font-bold text-text-main flex items-center gap-2"><ShoppingBag className="text-primary" /> {t('Menu')}</h2>
+                           <div className="flex items-center gap-2">
+                               {['All', 'Coffee', 'Non Coffee', 'Matcha', 'Food'].map(cat => (
+                                   <button key={cat} onClick={() => setMenuCategory(cat)} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${menuCategory === cat ? 'bg-primary text-background' : 'bg-surface border border-border text-secondary hover:text-text-main'}`}>{t(cat)}</button>
+                               ))}
+                           </div>
+                       </div>
+                       <div className="flex-1 overflow-y-auto p-6 bg-background custom-scrollbar">
+                           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                               {filteredMenu.map(item => (
+                                   <button key={item.id} onClick={() => handleAddToOrder(item)} disabled={item.stock <= 0} className={`bg-surface border border-border rounded-2xl p-3 flex flex-col gap-3 hover:border-primary transition-all text-left group shadow-sm ${item.stock <= 0 ? 'opacity-50 grayscale' : ''}`}>
+                                       <div className="aspect-[4/3] bg-background rounded-xl overflow-hidden relative">
+                                           {item.image ? <img src={item.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform" /> : <div className="w-full h-full flex items-center justify-center text-xs text-secondary">No Image</div>}
+                                           {item.stock <= 0 && <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-xs font-black text-white uppercase tracking-widest">Sold Out</div>}
+                                       </div>
+                                       <div>
+                                           <h4 className="font-bold text-text-main text-sm line-clamp-1">{item.name}</h4>
+                                           <p className="text-primary font-bold text-sm mt-1">{formatPrice(item.price)}</p>
+                                       </div>
+                                   </button>
+                               ))}
+                           </div>
+                       </div>
                   </div>
-                  <div className="p-6 bg-background border-t border-border space-y-4"><div className="flex justify-between text-xl font-bold text-white pt-2 border-t border-border"><span>Total</span><span className="text-primary">{formatPrice(calculateTotal(currentOrderItems))}</span></div><button onClick={handleConfirmOrder} className="w-full py-3 bg-primary text-background font-bold rounded-xl hover:bg-primary-hover">Save Changes</button></div>
+                  
+                  {/* RIGHT: CART */}
+                  <div className="w-full lg:w-[30%] bg-surface flex flex-col h-full shadow-2xl relative z-10">
+                       <div className="h-16 flex items-center justify-between px-6 border-b border-border bg-background">
+                           <h3 className="font-bold text-text-main">{t('Current Order')}</h3>
+                           <button onClick={() => setShowMenuModal(false)} className="size-8 rounded-full bg-border/50 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors"><X size={18} /></button>
+                       </div>
+                       
+                       <div className="p-4 bg-primary/5 border-b border-primary/10 flex justify-between items-center">
+                           <div className="flex flex-col">
+                               <span className="text-xs font-bold text-secondary uppercase">{t('Table')}</span>
+                               <span className="text-lg font-black text-text-main">{selectedTable?.label}</span>
+                           </div>
+                           <div className="text-right">
+                               <span className="text-xs font-bold text-secondary uppercase">{t('Guests')}</span>
+                               <span className="text-lg font-black text-text-main block">{guestCount}</span>
+                           </div>
+                       </div>
+
+                       <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                            {currentOrderItems.length === 0 ? (
+                                <div className="h-full flex flex-col items-center justify-center text-secondary opacity-50 space-y-4">
+                                    <ShoppingBag size={48} strokeWidth={1} />
+                                    <p>{t('Cart is empty')}</p>
+                                </div>
+                            ) : (
+                                currentOrderItems.map(item => (
+                                    <div key={item.id} className="bg-background rounded-xl p-3 flex items-center gap-3 border border-border shadow-sm">
+                                        <div className="flex flex-col items-center gap-1 bg-surface border border-border rounded-lg p-1">
+                                            <button onClick={() => handleUpdateOrderQty(item.id, 1)} className="hover:text-primary"><Plus size={14}/></button>
+                                            <span className="font-bold text-text-main text-xs">{item.qty}</span>
+                                            <button onClick={() => handleUpdateOrderQty(item.id, -1)} className="hover:text-primary"><Minus size={14}/></button>
+                                        </div>
+                                        <div className="flex-1">
+                                            <p className="text-text-main font-bold text-sm line-clamp-1">{item.name}</p>
+                                            <p className="text-primary text-xs font-medium">{formatPrice(item.price)}</p>
+                                        </div>
+                                        <div className="text-right">
+                                            <p className="text-text-main font-bold">{formatPrice(item.price * item.qty)}</p>
+                                            <button onClick={() => handleRemoveFromOrder(item.id)} className="text-[10px] text-red-500 hover:underline">Remove</button>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                       </div>
+
+                       <div className="p-6 bg-background border-t border-border space-y-4 mt-auto shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
+                           <div className="flex justify-between text-xl font-bold text-text-main">
+                               <span>{t('Total')}</span>
+                               <span className="text-primary">{formatPrice(calculateTotal(currentOrderItems))}</span>
+                           </div>
+                           <button onClick={handleConfirmOrder} className="w-full py-4 bg-primary text-background font-bold rounded-xl hover:bg-primary-hover shadow-lg shadow-primary/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98]">
+                               <Check size={20} /> {t('Confirm Order')}
+                           </button>
+                       </div>
+                  </div>
               </div>
           </div>
       )}
 
       {/* --- PAYMENT MODAL --- */}
-      {showPaymentModal && (
-          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm">
-              <div className="bg-surface border border-border rounded-2xl w-full max-w-md shadow-2xl flex flex-col animate-in scale-95 duration-200">
-                  <div className="p-6 border-b border-border flex justify-between items-center"><h3 className="font-bold text-white text-xl">Payment</h3><button onClick={() => setShowPaymentModal(false)}><X size={20} className="text-secondary hover:text-white"/></button></div>
-                  <div className="p-6 space-y-6">
-                      <div className="text-center"><p className="text-secondary text-sm mb-1">Total Amount</p><p className="text-4xl font-bold text-white">{formatPrice(calculateTotal(selectedTable?.items || []))}</p></div>
-                      <div className="grid grid-cols-3 gap-3">
-                          {['Cash', 'Card', 'Transfer'].map(method => (
-                              <button key={method} onClick={() => setPaymentMethod(method as any)} className={`flex flex-col items-center justify-center p-4 rounded-xl border transition-all ${paymentMethod === method ? 'bg-primary text-background border-primary' : 'bg-background border-border text-secondary hover:border-primary/50'}`}>
-                                  {method === 'Cash' ? <DollarSign size={24}/> : method === 'Card' ? <CreditCard size={24}/> : <ArrowRightLeft size={24}/>}
-                                  <span className="text-xs font-bold mt-2">{method}</span>
-                              </button>
-                          ))}
-                      </div>
-                  </div>
-                  
-                  {/* CHECKBOX AUTO PRINT (Đã sửa icon Check được import từ lucide-react) */}
-                  <div 
-                    onClick={() => setAutoPrintBill(!autoPrintBill)}
-                    className={`cursor-pointer border rounded-xl p-3 flex items-center justify-between transition-all select-none mb-4 mx-6
-                    ${autoPrintBill 
-                        ? 'bg-blue-500/10 border-blue-500 text-blue-400' 
-                        : 'bg-surface border-border text-secondary hover:text-white'}`}
-                  >
-                    <div className="flex items-center gap-3">
-                        <div className={`p-2 rounded-lg ${autoPrintBill ? 'bg-blue-500 text-white' : 'bg-black/20'}`}>
-                            <Printer size={20} />
-                        </div>
-                        <div className="flex flex-col">
-                            <span className={`font-bold text-sm ${autoPrintBill ? 'text-white' : ''}`}>Auto Print Bill</span>
-                            <span className="text-xs opacity-70">Print receipt upon payment</span>
-                        </div>
-                    </div>
-                    <div className={`w-12 h-6 rounded-full relative transition-colors ${autoPrintBill ? 'bg-blue-500' : 'bg-black/40'}`}>
-                        <div className={`absolute top-1 size-4 bg-white rounded-full transition-all ${autoPrintBill ? 'left-7' : 'left-1'}`}></div>
-                    </div>
-                  </div>
-
-                  <div className="p-6 border-t border-border"><button onClick={handleConfirmPayment} className="w-full py-4 bg-primary text-background font-bold rounded-xl text-lg hover:bg-primary-hover shadow-lg shadow-primary/20">Confirm Payment</button></div>
-              </div>
-          </div>
+      {showPaymentModal && selectedTable && selectedTable.orderId && (
+        <PaymentModal
+          isOpen={showPaymentModal}
+          onClose={() => setShowPaymentModal(false)}
+          onConfirm={handlePaymentConfirm}
+          onPrint={() => {
+              const fullOrder = {
+                  id: selectedTable.orderId,
+                  table: selectedTable.label,
+                  staff: selectedTable.waiter || 'Staff',
+                  items: selectedTable.items,
+                  total: calculateTotal(selectedTable.items),
+                  created_at: new Date().toISOString()
+              };
+              printOrderReceipt(fullOrder);
+          }}
+          totalAmount={calculateTotal(selectedTable.items)}
+          orderId={selectedTable.orderId}
+          isProcessing={isProcessingPayment}
+        />
       )}
 
-      {/* --- TABLE OPERATIONS MODAL (Giữ nguyên) --- */}
-      {showTransferModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm">
-            <div className="bg-surface border border-border rounded-2xl w-full max-w-3xl shadow-2xl flex flex-col max-h-[90vh] animate-in scale-95 duration-200">
-                <div className="p-5 border-b border-border flex justify-between items-center">
-                    <div><h3 className="font-bold text-white text-xl">Table Operations</h3><p className="text-secondary text-sm">Transfer order to an empty table OR Merge with an occupied table</p></div>
-                    <button onClick={() => setShowTransferModal(false)} className="text-secondary hover:text-white"><X size={24} /></button>
-                </div>
-                <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-                    <div className="grid grid-cols-3 md:grid-cols-4 gap-4">
-                        {availableTargets.map(t => {
-                            const isAvailable = t.status === 'Available';
-                            return (
-                                <button key={t.id} onClick={() => handleTransferMerge(t)} className={`p-4 rounded-xl border transition-all flex flex-col items-center justify-center gap-3 h-32 group ${isAvailable ? 'bg-background border-border hover:border-primary hover:bg-primary/5' : 'bg-red-500/5 border-red-500/20 hover:border-red-500 hover:bg-red-500/10'}`}>
-                                    <div className={isAvailable ? 'text-white' : 'text-red-500'}>{isAvailable ? <ArrowRightLeft size={24} /> : <Merge size={24} />}</div>
-                                    <div className="text-center"><p className={`font-bold text-lg ${isAvailable ? 'text-white' : 'text-red-500'}`}>{t.label}</p><p className="text-xs font-bold uppercase mt-1">{isAvailable ? <span className="text-primary">Transfer Here</span> : <span className="text-red-400">Merge Here</span>}</p></div>
-                                </button>
-                            );
-                        })}
-                        {availableTargets.length === 0 && (<div className="col-span-full flex flex-col items-center justify-center py-10 text-secondary"><Armchair size={48} className="opacity-20 mb-4" /><p>No other tables available for operations.</p></div>)}
-                    </div>
-                </div>
-            </div>
-        </div>
+      {/* --- TRANSFER MODAL --- */}
+      {showTransferModal && selectedTable && (
+          <TransferModal
+            isOpen={showTransferModal}
+            onClose={() => setShowTransferModal(false)}
+            onConfirm={handleTransferConfirm}
+            currentTable={selectedTable}
+            allTables={tables}
+            isProcessing={isProcessingTransfer}
+          />
       )}
     </div>
   );

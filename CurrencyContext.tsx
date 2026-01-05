@@ -8,9 +8,13 @@ interface CurrencyContextType {
   formatPrice: (amount: number) => string;
 }
 
+interface CurrencyProviderProps {
+  children: ReactNode;
+}
+
 const CurrencyContext = createContext<CurrencyContextType | undefined>(undefined);
 
-export const CurrencyProvider = ({ children }: { children: ReactNode }) => {
+export const CurrencyProvider: React.FC<CurrencyProviderProps> = ({ children }) => {
   // Default is VND as requested
   const [currency, setCurrency] = useState<Currency>('VND');
 

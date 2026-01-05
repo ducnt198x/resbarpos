@@ -61,73 +61,6 @@ export const printTestTicket = () => {
   printHTML(content);
 };
 
-// --- HÓA ĐƠN BAR / BẾP (Mới thêm) ---
-export const printBarTicket = (
-  orderId: string,
-  type: 'Dine-in' | 'Takeaway',
-  tableName: string,
-  items: { item: { name: string }; qty: number }[]
-) => {
-  const itemsHtml = items.map(i => `
-    <div style="display: flex; align-items: flex-start; margin-bottom: 8px; border-bottom: 1px dashed #eee; padding-bottom: 4px;">
-        <div style="width: 15%; font-weight: 900; font-size: 16px; text-align: center;">${i.qty}</div>
-        <div style="width: 85%; font-weight: 600; line-height: 1.2;">${i.item.name}</div>
-    </div>
-  `).join('');
-
-  const content = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="UTF-8">
-        <style>
-          @page { size: 72mm auto; margin: 0; }
-          body { 
-            font-family: 'Consolas', monospace;
-            width: 72mm; 
-            margin: 0 auto; 
-            padding: 5px; 
-            color: #000;
-            font-size: 14px; 
-          }
-          .header { text-align: center; margin-bottom: 10px; border-bottom: 2px solid #000; padding-bottom: 5px; }
-          .title { font-size: 20px; font-weight: 900; text-transform: uppercase; display: block; }
-          .time { font-size: 12px; font-style: italic; }
-          
-          .meta { margin-bottom: 10px; border-bottom: 2px solid #000; padding-bottom: 5px; }
-          .table-name { font-size: 22px; font-weight: 900; display: block; margin-bottom: 4px; }
-          .order-id { font-size: 12px; }
-
-          .footer { margin-top: 15px; text-align: center; font-size: 12px; border-top: 1px dashed #000; padding-top: 5px; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <span class="title">PHIẾU CHẾ BIẾN</span>
-          <span class="time">${new Date().toLocaleString('vi-VN')}</span>
-        </div>
-        
-        <div class="meta">
-          <span class="table-name">
-            ${type === 'Takeaway' ? '🥡 MANG VỀ' : `🍽️ BÀN: ${tableName}`}
-          </span>
-          <span class="order-id">Mã đơn: ${orderId}</span>
-        </div>
-        
-        <div class="items">
-            ${itemsHtml}
-        </div>
-
-        <div class="footer">
-          --- Bar / Bếp ---
-        </div>
-      </body>
-    </html>
-  `;
-
-  printHTML(content);
-};
-
 // --- HÓA ĐƠN THANH TOÁN (Layout Hiện đại) ---
 export const printOrderReceipt = (order: any) => {
   if (!order) return;
@@ -261,7 +194,7 @@ export const printOrderReceipt = (order: any) => {
 
         <div class="footer text-center">
             <div>${config.footerMessage}</div>
-            <div style="font-size: 10px; margin-top: 5px;">Powered by ThongDong POS</div>
+            <div style="font-size: 10px; margin-top: 5px;">Powered by Resbar POS</div>
         </div>
 
       </body>

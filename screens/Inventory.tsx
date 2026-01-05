@@ -5,7 +5,6 @@ import {
   TrendingUp, 
   PlusCircle, 
   RefreshCw, 
-  Printer, 
   Check,
   X,
   Loader2,
@@ -14,10 +13,12 @@ import {
 } from 'lucide-react';
 import { useCurrency } from '../CurrencyContext';
 import { supabase, isSupabaseConfigured } from '../supabase';
-import { InventoryItem, MenuItem } from '../types';
+import { InventoryItem } from '../types';
+import { useTheme } from '../ThemeContext';
 
 export const Inventory: React.FC = () => {
   const { formatPrice } = useCurrency();
+  const { t } = useTheme();
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [menuItems, setMenuItems] = useState<any[]>([]); // Items with potential yield
   const [loading, setLoading] = useState(true);
@@ -161,32 +162,32 @@ export const Inventory: React.FC = () => {
   }, [items]);
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-background overflow-hidden">
-      <div className="h-20 border-b border-border flex items-center justify-between px-8 bg-background shrink-0">
+    <div className="flex-1 flex flex-col h-full bg-background overflow-hidden transition-colors">
+      <div className="h-20 border-b border-border flex items-center justify-between px-8 bg-background/95 backdrop-blur shrink-0 sticky top-0 z-10">
         <div>
-          <h1 className="text-white text-2xl font-bold tracking-tight">Inventory Management</h1>
-          <p className="text-secondary text-xs mt-1">Manage stock, alerts and yield estimation</p>
+          <h1 className="text-text-main text-2xl font-bold tracking-tight">{t('Inventory Management')}</h1>
+          <p className="text-secondary text-xs mt-1">{t('Manage stock')}</p>
         </div>
         <div className="flex gap-3">
-           <div className="bg-surface border border-border p-1 rounded-lg flex">
+           <div className="bg-surface border border-border p-1 rounded-lg flex shadow-sm">
                <button 
                   onClick={() => setViewMode('stock')}
-                  className={`px-3 py-1 text-xs font-bold rounded ${viewMode === 'stock' ? 'bg-primary text-background' : 'text-secondary hover:text-white'}`}
+                  className={`px-3 py-1 text-xs font-bold rounded transition-all ${viewMode === 'stock' ? 'bg-primary text-background shadow' : 'text-secondary hover:text-text-main'}`}
                >
-                  Stock View
+                  {t('Stock View')}
                </button>
                <button 
                   onClick={() => setViewMode('yield')}
-                  className={`px-3 py-1 text-xs font-bold rounded ${viewMode === 'yield' ? 'bg-primary text-background' : 'text-secondary hover:text-white'}`}
+                  className={`px-3 py-1 text-xs font-bold rounded transition-all ${viewMode === 'yield' ? 'bg-primary text-background shadow' : 'text-secondary hover:text-text-main'}`}
                >
-                  Yield Analysis
+                  {t('Yield Analysis')}
                </button>
            </div>
           <button 
             onClick={fetchData}
-            className="flex items-center gap-2 px-4 h-9 rounded-lg bg-surface border border-border text-white text-sm font-bold hover:bg-border transition-all"
+            className="flex items-center gap-2 px-4 h-9 rounded-lg bg-surface border border-border text-text-main text-sm font-bold hover:border-primary transition-all shadow-sm"
           >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> Sync
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} /> {t('Sync')}
           </button>
         </div>
       </div>
@@ -196,36 +197,36 @@ export const Inventory: React.FC = () => {
           
           {/* KPI Cards */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="p-5 rounded-2xl bg-surface border border-border shadow-sm flex flex-col relative overflow-hidden group">
+            <div className="p-5 rounded-2xl bg-surface border border-border shadow-soft flex flex-col relative overflow-hidden group">
                <div className="flex items-center gap-3 mb-2">
-                 <div className="p-2 rounded-lg bg-primary/10 text-primary"><Package size={20} /></div>
-                 <p className="text-secondary text-xs font-bold uppercase tracking-wider">Total Value</p>
+                 <div className="p-2 rounded-lg bg-primary-bg text-primary"><Package size={20} /></div>
+                 <p className="text-secondary text-xs font-bold uppercase tracking-wider">{t('Total Value')}</p>
                </div>
                <div className="flex items-end justify-between">
-                 <p className="text-white text-3xl font-bold">{formatPrice(stats.totalValue)}</p>
+                 <p className="text-text-main text-3xl font-bold">{formatPrice(stats.totalValue)}</p>
                </div>
             </div>
             
-            <div className="p-5 rounded-2xl bg-surface border border-border shadow-sm flex flex-col relative overflow-hidden group hover:border-red-500/50 transition-colors">
+            <div className="p-5 rounded-2xl bg-surface border border-border shadow-soft flex flex-col relative overflow-hidden group hover:border-red-500/50 transition-colors">
                <div className="flex items-center gap-3 mb-2">
                  <div className="p-2 rounded-lg bg-red-500/10 text-red-500"><AlertTriangle size={20} /></div>
-                 <p className="text-secondary text-xs font-bold uppercase tracking-wider">Low Stock</p>
+                 <p className="text-secondary text-xs font-bold uppercase tracking-wider">{t('Low Stock')}</p>
                </div>
                <div className="flex items-end justify-between">
-                 <p className="text-white text-3xl font-bold">{stats.lowStockCount} Items</p>
+                 <p className="text-text-main text-3xl font-bold">{stats.lowStockCount}</p>
                  <span className={`text-xs font-bold px-2 py-1 rounded-lg border ${stats.lowStockCount > 0 ? 'text-red-500 bg-red-500/10 border-red-500/20' : 'text-green-500 bg-green-500/10 border-green-500/20'}`}>
-                   {stats.lowStockCount > 0 ? 'Action Needed' : 'All Good'}
+                   {stats.lowStockCount > 0 ? t('Action Needed') : t('All Good')}
                  </span>
                </div>
             </div>
 
-            <div className="p-5 rounded-2xl bg-surface border border-border shadow-sm flex flex-col relative overflow-hidden group">
+            <div className="p-5 rounded-2xl bg-surface border border-border shadow-soft flex flex-col relative overflow-hidden group">
                <div className="flex items-center gap-3 mb-2">
                  <div className="p-2 rounded-lg bg-orange-500/10 text-orange-500"><TrendingUp size={20} /></div>
-                 <p className="text-secondary text-xs font-bold uppercase tracking-wider">Top Item</p>
+                 <p className="text-secondary text-xs font-bold uppercase tracking-wider">{t('Top Item')}</p>
                </div>
                <div className="flex items-end justify-between">
-                 <p className="text-white text-3xl font-bold truncate max-w-[150px]">{stats.topItem?.name || 'N/A'}</p>
+                 <p className="text-text-main text-3xl font-bold truncate max-w-[150px]">{stats.topItem?.name || 'N/A'}</p>
                </div>
             </div>
           </div>
@@ -233,21 +234,21 @@ export const Inventory: React.FC = () => {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Form - Only in Stock View */}
             {viewMode === 'stock' && (
-              <div className="lg:col-span-4 bg-surface border border-border rounded-2xl p-6 h-fit flex flex-col sticky top-0">
+              <div className="lg:col-span-4 bg-surface border border-border rounded-2xl p-6 h-fit flex flex-col sticky top-0 shadow-soft">
                 <div className="flex items-center gap-3 mb-6">
-                  <div className="bg-primary/20 p-2 rounded-lg text-primary"><PlusCircle size={24} /></div>
+                  <div className="bg-primary-bg p-2 rounded-lg text-primary"><PlusCircle size={24} /></div>
                   <div>
-                    <h2 className="text-white text-lg font-bold">Stock In</h2>
-                    <p className="text-secondary text-xs">Add new ingredients</p>
+                    <h2 className="text-text-main text-lg font-bold">{t('Stock In')}</h2>
+                    <p className="text-secondary text-xs">{t('Add new ingredients')}</p>
                   </div>
                 </div>
                 
                 <form className="flex flex-col gap-5 flex-1" onSubmit={handleStockIn}>
                   <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">Ingredient Name</label>
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">{t('Ingredient Name')}</label>
                     <div className="relative">
                       <input 
-                        className="w-full bg-background text-white border border-border rounded-xl px-4 py-3 focus:ring-1 focus:ring-primary focus:border-primary text-sm font-medium" 
+                        className="w-full bg-background text-text-main border border-border rounded-xl px-4 py-3 focus:ring-1 focus:ring-primary focus:border-primary text-sm font-medium outline-none transition-all" 
                         placeholder="e.g. Fresh Milk" 
                         type="text"
                         value={formData.name}
@@ -258,7 +259,7 @@ export const Inventory: React.FC = () => {
                            <button 
                              type="button" 
                              onClick={() => setFormData({...formData, name: ''})}
-                             className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary hover:text-white"
+                             className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary hover:text-text-main"
                            >
                              <X size={16} />
                            </button>
@@ -268,9 +269,9 @@ export const Inventory: React.FC = () => {
                   
                   <div className="grid grid-cols-2 gap-4">
                     <div className="flex flex-col gap-2">
-                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">Quantity</label>
+                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">{t('Quantity')}</label>
                       <input 
-                        className="w-full bg-background text-white border border-border rounded-xl px-4 py-3 focus:ring-1 focus:ring-primary text-sm font-medium" 
+                        className="w-full bg-background text-text-main border border-border rounded-xl px-4 py-3 focus:ring-1 focus:ring-primary text-sm font-medium outline-none transition-all" 
                         placeholder="0.00" 
                         type="number"
                         step="0.01"
@@ -280,9 +281,9 @@ export const Inventory: React.FC = () => {
                       />
                     </div>
                     <div className="flex flex-col gap-2">
-                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">Unit</label>
+                      <label className="text-xs font-bold text-secondary uppercase tracking-wider">{t('Unit')}</label>
                       <select 
-                        className="w-full bg-background text-white border border-border rounded-xl px-4 py-3 focus:ring-1 focus:ring-primary text-sm font-medium appearance-none"
+                        className="w-full bg-background text-text-main border border-border rounded-xl px-4 py-3 focus:ring-1 focus:ring-primary text-sm font-medium appearance-none outline-none transition-all cursor-pointer"
                         value={formData.unit}
                         onChange={(e) => setFormData({...formData, unit: e.target.value})}
                       >
@@ -297,9 +298,9 @@ export const Inventory: React.FC = () => {
                   </div>
 
                   <div className="flex flex-col gap-2">
-                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">Category</label>
+                    <label className="text-xs font-bold text-secondary uppercase tracking-wider">{t('Category')}</label>
                     <select 
-                      className="w-full bg-background text-white border border-border rounded-xl px-4 py-3 focus:ring-1 focus:ring-primary text-sm font-medium appearance-none"
+                      className="w-full bg-background text-text-main border border-border rounded-xl px-4 py-3 focus:ring-1 focus:ring-primary text-sm font-medium appearance-none outline-none transition-all cursor-pointer"
                       value={formData.category}
                       onChange={(e) => setFormData({...formData, category: e.target.value})}
                     >
@@ -318,22 +319,22 @@ export const Inventory: React.FC = () => {
                       ${isSuccess ? 'bg-green-500 text-white' : 'bg-primary hover:bg-primary-hover text-background shadow-primary/20'}
                     `}
                   >
-                    {isSuccess ? <><Check size={20} /> Stock Added</> : <><PlusCircle size={20} /> Add Stock</>}
+                    {isSuccess ? <><Check size={20} /> {t('Stock Added')}</> : <><PlusCircle size={20} /> {t('Add Stock')}</>}
                   </button>
                 </form>
               </div>
             )}
 
             {/* Main Table Area */}
-            <div className={`${viewMode === 'stock' ? 'lg:col-span-8' : 'lg:col-span-12'} bg-surface border border-border rounded-2xl flex flex-col h-full overflow-hidden`}>
+            <div className={`${viewMode === 'stock' ? 'lg:col-span-8' : 'lg:col-span-12'} bg-surface border border-border rounded-2xl flex flex-col h-full overflow-hidden shadow-soft`}>
                <div className="p-6 border-b border-border flex justify-between items-center bg-surface">
                  <div className="flex items-center gap-3">
-                   <div className="bg-primary/20 p-2 rounded-lg text-primary">
+                   <div className="bg-primary-bg p-2 rounded-lg text-primary">
                        {viewMode === 'stock' ? <Package size={20} /> : <Calculator size={20} />}
                    </div>
                    <div>
-                     <h2 className="text-white text-lg font-bold">{viewMode === 'stock' ? 'Inventory List' : 'Potential Yield Analysis'}</h2>
-                     <p className="text-secondary text-xs">{viewMode === 'stock' ? 'Track all ingredients' : 'Theoretical max output based on ingredients'}</p>
+                     <h2 className="text-text-main text-lg font-bold">{viewMode === 'stock' ? t('Inventory List') : t('Potential Yield Analysis')}</h2>
+                     <p className="text-secondary text-xs">{viewMode === 'stock' ? t('Track all ingredients') : t('Theoretical max')}</p>
                    </div>
                  </div>
                </div>
@@ -347,10 +348,10 @@ export const Inventory: React.FC = () => {
                    <table className="w-full text-left">
                      <thead className="bg-background text-secondary text-xs uppercase font-bold tracking-wider sticky top-0 z-10">
                        <tr>
-                         <th className="px-6 py-4 border-b border-border">Item Name</th>
-                         <th className="px-6 py-4 border-b border-border">{viewMode === 'stock' ? 'Stock Level' : 'Est. Yield'}</th>
-                         <th className="px-6 py-4 border-b border-border">Status</th>
-                         {viewMode === 'stock' && <th className="px-6 py-4 border-b border-border text-right">Action</th>}
+                         <th className="px-6 py-4 border-b border-border">{t('Item Name')}</th>
+                         <th className="px-6 py-4 border-b border-border">{viewMode === 'stock' ? t('Stock Level') : t('Est. Yield')}</th>
+                         <th className="px-6 py-4 border-b border-border">{t('Status')}</th>
+                         {viewMode === 'stock' && <th className="px-6 py-4 border-b border-border text-right">{t('Action')}</th>}
                        </tr>
                      </thead>
                      <tbody className="divide-y divide-border text-sm">
@@ -364,13 +365,13 @@ export const Inventory: React.FC = () => {
                                     {item.name.substring(0,2).toUpperCase()}
                                     </div>
                                     <div>
-                                    <p className="font-bold text-white">{item.name}</p>
+                                    <p className="font-bold text-text-main">{item.name}</p>
                                     <p className="text-xs text-secondary">{item.category}</p>
                                     </div>
                                 </div>
                             </td>
                             <td className="px-6 py-4">
-                              <span className="text-white font-bold">{item.stock} {item.unit}</span>
+                              <span className="text-text-main font-bold">{item.stock} {item.unit}</span>
                               <span className="text-secondary text-xs ml-2">/ {item.max_stock}</span>
                             </td>
                             <td className="px-6 py-4">
@@ -378,7 +379,7 @@ export const Inventory: React.FC = () => {
                                 ${item.status === 'Critical' ? 'bg-red-500/10 text-red-500' : 
                                   item.status === 'Low' ? 'bg-orange-500/10 text-orange-500' : 
                                   'bg-green-500/10 text-green-500'}`}>
-                                {item.status}
+                                {t(item.status)}
                               </span>
                             </td>
                             <td className="px-6 py-4 text-right">
@@ -393,23 +394,23 @@ export const Inventory: React.FC = () => {
                           menuItems.map((item) => (
                               <tr key={item.id} className="hover:bg-border/30 transition-colors">
                                   <td className="px-6 py-4">
-                                      <p className="font-bold text-white">{item.name}</p>
+                                      <p className="font-bold text-text-main">{item.name}</p>
                                       <p className="text-xs text-secondary">{item.category}</p>
                                   </td>
                                   <td className="px-6 py-4">
                                       {item.theoreticalYield === -1 ? (
-                                          <span className="text-secondary text-xs italic">No recipe defined</span>
+                                          <span className="text-secondary text-xs italic">{t('No recipe defined')}</span>
                                       ) : (
                                           <div className="flex items-center gap-2">
                                               <span className="text-xl font-bold text-primary">{item.theoreticalYield}</span>
-                                              <span className="text-xs text-secondary">units</span>
+                                              <span className="text-xs text-secondary">{t('units')}</span>
                                           </div>
                                       )}
                                   </td>
                                   <td className="px-6 py-4">
                                       <div className="flex flex-col">
-                                          <span className="text-[10px] text-secondary uppercase font-bold">Manual Stock</span>
-                                          <span className="text-white font-bold">{item.stock}</span>
+                                          <span className="text-[10px] text-secondary uppercase font-bold">{t('Manual Stock')}</span>
+                                          <span className="text-text-main font-bold">{item.stock}</span>
                                       </div>
                                   </td>
                               </tr>

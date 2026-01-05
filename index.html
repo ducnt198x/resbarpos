@@ -11,6 +11,58 @@
       rel="stylesheet"
     />
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* DEFINING THEME VARIABLES */
+      :root {
+        /* PROFESSIONAL LIGHT MODE (SaaS Style - Slate Palette) */
+        --color-background: #F8FAFC;  /* Slate 50 - Nền tổng thể sạch sẽ */
+        --color-surface: #FFFFFF;     /* White - Card nổi bật */
+        --color-border: #E2E8F0;      /* Slate 200 - Viền tinh tế */
+        
+        --color-text-main: #0F172A;   /* Slate 900 - Đen xanh hiện đại, dễ đọc */
+        --color-text-secondary: #64748B; /* Slate 500 - Text phụ dịu mắt */
+        
+        --color-primary-rgb: 16, 185, 129; /* Emerald 500 */
+        --color-primary-bg: #D1FAE5;       /* Emerald 100 - Nền badge/button nhạt */
+
+        /* Floor Plan Specific - Architectural Blueprint Style */
+        --color-grid: #E2E8F0;        /* Slate 200 - Lưới ô vuông rõ ràng trên giấy trắng */
+        --color-floor-bg: #F8FAFC;    /* Slate 50 - Nền giấy vẽ */
+      }
+      
+      .dark {
+        /* DARK MODE (Original Deep Green) */
+        --color-background: #11211c;
+        --color-surface: #1a2c26;
+        --color-border: #24473b;
+        
+        --color-text-main: #FFFFFF;
+        --color-text-secondary: #93c8b6;
+        
+        --color-primary-rgb: 25, 230, 162; /* #19e6a2 */
+        --color-primary-bg: rgba(25, 230, 162, 0.1);
+
+        /* Floor Plan Specific - Cyberpunk Command Center */
+        --color-grid: #24473b;        /* Grid xanh tối, chìm vào nền */
+        --color-floor-bg: #0d1815;    /* Nền đen sâu thẳm */
+      }
+
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar {
+        width: 6px;
+        height: 6px;
+      }
+      ::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      ::-webkit-scrollbar-thumb {
+        background: var(--color-border);
+        border-radius: 99px;
+      }
+      ::-webkit-scrollbar-thumb:hover {
+        background: var(--color-text-secondary);
+      }
+    </style>
     <script>
       tailwind.config = {
         darkMode: 'class',
@@ -20,50 +72,45 @@
               sans: ['Manrope', 'sans-serif'],
             },
             colors: {
-              background: '#11211c',
-              surface: '#1a2c26',
-              primary: '#19e6a2',
-              'primary-hover': '#14b881',
-              secondary: '#93c8b6',
-              border: '#24473b',
+              background: 'var(--color-background)',
+              surface: 'var(--color-surface)',
+              border: 'var(--color-border)',
+              
+              primary: 'rgba(var(--color-primary-rgb), 1)',
+              'primary-hover': 'rgba(var(--color-primary-rgb), 0.8)',
+              'primary-bg': 'var(--color-primary-bg)', // New variable for light backgrounds
+              
+              // Semantic Text Colors
+              'text-main': 'var(--color-text-main)',
+              'text-secondary': 'var(--color-text-secondary)',
+              
+              // Map legacy names for compatibility
+              secondary: 'var(--color-text-secondary)', 
             },
+            boxShadow: {
+              'soft': '0 4px 20px -2px rgba(0, 0, 0, 0.05)', // Softer shadow for light mode
+            }
           },
         },
       };
     </script>
-    <style>
-      /* Custom Scrollbar */
-      ::-webkit-scrollbar {
-        width: 8px;
-        height: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #11211c;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #24473b;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #346555;
-      }
-    </style>
   <script type="importmap">
 {
   "imports": {
-    "lucide-react": "https://esm.sh/lucide-react@^0.562.0",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
-    "react/": "https://esm.sh/react@^19.2.3/",
-    "react": "https://esm.sh/react@^19.2.3",
-    "recharts": "https://esm.sh/recharts@^3.6.0",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@^2.39.0",
-    "react-to-print": "https://esm.sh/react-to-print@3.0.2"
+    "lucide-react": "https://esm.sh/lucide-react@0.469.0?external=react",
+    "react": "https://esm.sh/react@18.2.0",
+    "react/": "https://esm.sh/react@18.2.0/",
+    "react-dom": "https://esm.sh/react-dom@18.2.0?deps=react@18.2.0",
+    "react-dom/": "https://esm.sh/react-dom@18.2.0/",
+    "recharts": "https://esm.sh/recharts@2.15.0?external=react,react-dom",
+    "reselect": "https://esm.sh/reselect@5.1.0",
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.39.0",
+    "react-to-print": "https://esm.sh/react-to-print@3.0.2?external=react,react-dom"
   }
 }
 </script>
 </head>
-  <body class="bg-background text-white antialiased overflow-hidden">
+  <body class="bg-background text-text-main antialiased overflow-hidden transition-colors duration-300">
     <div id="root"></div>
-    <script type="module" src="/index.tsx"></script>
   </body>
 </html>

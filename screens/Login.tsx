@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import { Mail, Lock, Eye, EyeOff, ArrowRight, ChefHat, User } from 'lucide-react';
 import { supabase } from '../supabase';
+import { useTheme } from '../ThemeContext';
 
 interface LoginProps {
   onLogin: () => void;
 }
 
 export const Login: React.FC<LoginProps> = ({ onLogin }) => {
+  const { t } = useTheme();
   const [isSignUp, setIsSignUp] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -76,26 +78,25 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
   };
 
   return (
-    <div className="flex w-full h-screen bg-background text-white relative">
+    <div className="flex w-full h-screen bg-background text-text-main relative transition-colors">
       {/* Left Visual Side */}
-      <div className="hidden lg:flex w-1/2 relative bg-surface items-center justify-center overflow-hidden">
+      <div className="hidden lg:flex w-1/2 relative bg-[#1a2c26] items-center justify-center overflow-hidden">
         <div className="absolute inset-0 z-0">
           <img 
             src="https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?q=80&w=2070&auto=format&fit=crop"
             alt="Restaurant Interior" 
-            className="w-full h-full object-cover opacity-40"
+            className="w-full h-full object-cover opacity-40 mix-blend-overlay"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-background via-background/40 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black via-black/40 to-transparent" />
         </div>
         
         <div className="relative z-10 flex flex-col items-center text-center p-12 max-w-lg">
           <div className="size-20 rounded-2xl bg-primary flex items-center justify-center text-background mb-8 shadow-2xl shadow-primary/20">
             <ChefHat size={48} strokeWidth={2} />
           </div>
-          <h1 className="text-4xl font-bold mb-4">Respo POS System</h1>
+          <h1 className="text-4xl font-bold mb-4 text-white">{t('ResBar POS System')}</h1>
           <p className="text-lg text-gray-300 leading-relaxed">
-            Streamline your restaurant operations with our comprehensive management solution. 
-            Track orders, manage inventory, and analyze performance in real-time.
+            {t('LoginDescription')}
           </p>
         </div>
       </div>
@@ -104,11 +105,11 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-background">
         <div className="w-full max-w-md space-y-8">
           <div className="text-center lg:text-left animate-in slide-in-from-bottom-4 duration-500">
-            <h2 className="text-3xl font-bold tracking-tight">
-              {isSignUp ? 'Create an Account' : 'Welcome back'}
+            <h2 className="text-3xl font-bold tracking-tight text-text-main">
+              {isSignUp ? t('Create an Account') : t('Welcome to ResBar Pos')}
             </h2>
             <p className="text-secondary mt-2">
-              {isSignUp ? 'Register to start managing your restaurant.' : 'Please enter your details to sign in.'}
+              {isSignUp ? t('Register text') : t('Login text')}
             </p>
           </div>
 
@@ -116,7 +117,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             <div className="space-y-4">
               {isSignUp && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <label className="text-sm font-bold text-gray-300 ml-1">Full Name</label>
+                  <label className="text-sm font-bold text-secondary ml-1">{t('Full Name')}</label>
                   <div className="relative group">
                     <div className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary group-focus-within:text-primary transition-colors">
                       <User size={20} />
@@ -126,7 +127,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                       placeholder="John Doe"
                       value={fullName}
                       onChange={e => setFullName(e.target.value)}
-                      className="w-full bg-surface border border-border rounded-xl py-3.5 pl-10 pr-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                      className="w-full bg-surface border border-border rounded-xl py-3.5 pl-10 pr-4 text-text-main placeholder-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all shadow-sm"
                       required={isSignUp}
                     />
                   </div>
@@ -134,24 +135,24 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
               )}
 
               <div className="space-y-2">
-                <label className="text-sm font-bold text-gray-300 ml-1">Email Address</label>
+                <label className="text-sm font-bold text-secondary ml-1">{t('Email Address')}</label>
                 <div className="relative group">
                   <div className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary group-focus-within:text-primary transition-colors">
                     <Mail size={20} />
                   </div>
                   <input 
                     type="email" 
-                    placeholder="manager@respo.com"
+                    placeholder="manager@resbar.com"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
-                    className="w-full bg-surface border border-border rounded-xl py-3.5 pl-10 pr-4 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                    className="w-full bg-surface border border-border rounded-xl py-3.5 pl-10 pr-4 text-text-main placeholder-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all shadow-sm"
                     required
                   />
                 </div>
               </div>
 
               <div className="space-y-2">
-                <label className="text-sm font-bold text-gray-300 ml-1">Password</label>
+                <label className="text-sm font-bold text-secondary ml-1">{t('Password')}</label>
                 <div className="relative group">
                   <div className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary group-focus-within:text-primary transition-colors">
                     <Lock size={20} />
@@ -161,13 +162,13 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     placeholder="••••••••"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
-                    className="w-full bg-surface border border-border rounded-xl py-3.5 pl-10 pr-12 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                    className="w-full bg-surface border border-border rounded-xl py-3.5 pl-10 pr-12 text-text-main placeholder-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all shadow-sm"
                     required
                   />
                   <button 
                     type="button"
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary hover:text-white transition-colors"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary hover:text-text-main transition-colors"
                   >
                     {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
                   </button>
@@ -176,7 +177,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
               {isSignUp && (
                 <div className="space-y-2 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <label className="text-sm font-bold text-gray-300 ml-1">Confirm Password</label>
+                  <label className="text-sm font-bold text-secondary ml-1">{t('Confirm Password')}</label>
                   <div className="relative group">
                     <div className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary group-focus-within:text-primary transition-colors">
                       <Lock size={20} />
@@ -186,7 +187,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                       placeholder="••••••••"
                       value={confirmPassword}
                       onChange={e => setConfirmPassword(e.target.value)}
-                      className="w-full bg-surface border border-border rounded-xl py-3.5 pl-10 pr-12 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
+                      className="w-full bg-surface border border-border rounded-xl py-3.5 pl-10 pr-12 text-text-main placeholder-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all shadow-sm"
                       required={isSignUp}
                     />
                   </div>
@@ -203,10 +204,10 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             {!isSignUp && (
               <div className="flex items-center justify-between text-sm">
                 <label className="flex items-center gap-2 cursor-pointer group">
-                  <input type="checkbox" className="w-4 h-4 rounded border-gray-600 bg-surface text-primary focus:ring-offset-background focus:ring-primary" />
-                  <span className="text-secondary group-hover:text-white transition-colors">Remember for 30 days</span>
+                  <input type="checkbox" className="w-4 h-4 rounded border-border bg-surface text-primary focus:ring-offset-background focus:ring-primary" />
+                  <span className="text-secondary group-hover:text-text-main transition-colors">{t('Remember me')}</span>
                 </label>
-                <a href="#" className="font-bold text-primary hover:text-primary-hover hover:underline">Forgot password?</a>
+                <a href="#" className="font-bold text-primary hover:text-primary-hover hover:underline">{t('Forgot password?')}</a>
               </div>
             )}
 
@@ -219,7 +220,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                 <div className="size-5 border-2 border-background/30 border-t-background rounded-full animate-spin" />
               ) : (
                 <>
-                  {isSignUp ? 'Create Account' : 'Sign In'} <ArrowRight size={20} />
+                  {isSignUp ? t('Create Account') : t('Sign In')} <ArrowRight size={20} />
                 </>
               )}
             </button>
@@ -227,12 +228,12 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
           <div className="text-center text-secondary text-sm">
             <p>
-              {isSignUp ? "Already have an account?" : "Don't have an account?"}
+              {isSignUp ? t('Already have an account?') : t('Don\'t have an account?')}
               <button 
                 onClick={toggleMode} 
                 className="font-bold text-primary hover:underline ml-2"
               >
-                {isSignUp ? 'Sign In' : 'Sign Up'}
+                {isSignUp ? t('Sign In') : t('Sign Up')}
               </button>
             </p>
           </div>
