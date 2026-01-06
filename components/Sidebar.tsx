@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState, useRef } from 'react';
 import { 
   LayoutDashboard, 
@@ -110,17 +109,18 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
 
   const handleCloseModal = () => { setShowProfileModal(false); setSelectedFile(null); setPreviewUrl(null); };
 
+  // Reordered Navigation Items based on user priority
   const mainItems: NavItem[] = [
     ...(role === 'admin' ? [{ id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' }] : []),
-    { id: 'menu', icon: UtensilsCrossed, label: 'Menu' },
     { id: 'floorplan', icon: Grid, label: 'Tables' },
+    { id: 'menu', icon: UtensilsCrossed, label: 'Menu' },
     { id: 'orders', icon: Receipt, label: 'Orders', badge: pendingCount > 0 ? pendingCount : undefined },
+    ...(role === 'admin' ? [{ id: 'inventory', icon: Package, label: 'Stock' }] : []),
     { id: 'settings', icon: Settings, label: 'Settings' }
   ];
 
-  const secondaryItems: NavItem[] = [
-    ...(role === 'admin' ? [{ id: 'inventory', icon: Package, label: 'Stock' }] : [])
-  ];
+  // Secondary items are now empty as Inventory was moved up to Main
+  const secondaryItems: NavItem[] = [];
 
   const handleMobileNavClick = (view: View) => { onChangeView(view); setShowMobileMoreMenu(false); }
 
@@ -163,11 +163,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
   return (
     <>
       <nav className="fixed bottom-0 left-0 w-full bg-background/95 backdrop-blur-md border-t border-border flex justify-around items-center h-[70px] z-50 px-2 pb-safe lg:hidden transition-colors">
+        {/* Only show first 4 items in mobile bottom bar, rest go to "More" */}
         {mainItems.slice(0, 4).map(item => renderIconNav(item, true))}
         
         <button 
           onClick={() => setShowMobileMoreMenu(true)} 
-          className={`flex flex-col items-center justify-center w-full h-full gap-1 active:scale-90 transition-transform ${[...secondaryItems, ...mainItems.slice(4)].some(i => i.id === currentView) ? 'text-primary' : 'text-secondary'}`}
+          className={`flex flex-col items-center justify-center w-full h-full gap-1 active:scale-90 transition-transform ${mainItems.slice(4).some(i => i.id === currentView) ? 'text-primary' : 'text-secondary'}`}
         >
           <div className="p-1">
              {avatarUrl ? (
@@ -194,7 +195,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
         </div>
 
         <nav className="flex-1 px-4 py-6 flex flex-col gap-2 overflow-y-auto custom-scrollbar">
-          {[...mainItems, ...secondaryItems].map(item => renderIconNav(item, false))}
+          {mainItems.map(item => renderIconNav(item, false))}
         </nav>
 
         <div className="p-4 border-t border-border mt-auto">
@@ -244,7 +245,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                {[...mainItems.slice(4), ...secondaryItems].map(item => (
+                {mainItems.slice(4).map(item => (
                   <button
                     key={item.id}
                     onClick={() => handleMobileNavClick(item.id as View)}
