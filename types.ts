@@ -8,7 +8,7 @@ export interface MenuItem {
   image: string;
   stock: number;
   status: 'In Stock' | 'Low Stock' | 'Out of Stock';
-  description: string;
+  description: string; 
 }
 
 export interface MenuItemIngredient {
