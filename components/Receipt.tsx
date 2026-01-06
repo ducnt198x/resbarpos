@@ -3,7 +3,7 @@ import { Order } from '../types';
 import { useCurrency } from '../CurrencyContext';
 
 interface ReceiptProps {
-  data: Order | null;
+  data: Order | null; 
 }
 
 export const Receipt: React.FC<ReceiptProps> = ({ data }) => {
