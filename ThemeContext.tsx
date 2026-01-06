@@ -13,7 +13,7 @@ interface ThemeContextType {
   t: (key: string) => string;
 }
 
-const translations: Record<Language, Record<string, string>> = { 
+const translations: Record<Language, Record<string, string>> = {
   en: {
     // Sidebar
     'Home': 'Home',
@@ -120,7 +120,7 @@ const translations: Record<Language, Record<string, string>> = {
     'No empty tables available': 'No empty tables available',
     'No other occupied tables': 'No other occupied tables',
 
-    // Inventory
+    // Inventory & Categories
     'Inventory Management': 'Inventory Management',
     'Manage stock': 'Manage stock, alerts and yield estimation',
     'Stock View': 'Stock View',
@@ -151,6 +151,22 @@ const translations: Record<Language, Record<string, string>> = {
     'units': 'units',
     'Manual Stock': 'Manual Stock',
     'No recipe defined': 'No recipe defined',
+    // Categories
+    'Pantry': 'Pantry',
+    'Dairy': 'Dairy',
+    'Produce': 'Produce',
+    'Packaging': 'Packaging',
+    'Meat': 'Meat',
+    'Seafood': 'Seafood',
+    'Beverages': 'Beverages',
+
+    // Payment Modal
+    'Confirm Payment': 'Confirm Payment',
+    'Total to Pay': 'Total to Pay',
+    'Order #': 'Order #',
+    'View': 'View',
+    'Auto Print Receipt': 'Auto Print Receipt',
+    'Complete Order': 'Complete Order',
 
     // Settings
     'System Settings': 'System Settings',
@@ -195,7 +211,7 @@ const translations: Record<Language, Record<string, string>> = {
     'Email Address': 'Email Address',
     'Password': 'Password',
     'Confirm Password': 'Confirm Password',
-    'Remember me': 'Remember me',
+    'Remember me': 'Remember for 30 days',
     'Forgot password?': 'Forgot password?',
     'Create Account': 'Create Account',
     'Already have an account?': 'Already have an account?',
@@ -307,7 +323,7 @@ const translations: Record<Language, Record<string, string>> = {
     'No empty tables available': 'Không có bàn trống',
     'No other occupied tables': 'Không có bàn nào để gộp',
 
-    // Inventory
+    // Inventory & Categories
     'Inventory Management': 'Quản lý kho hàng',
     'Manage stock': 'Quản lý tồn kho và định lượng',
     'Stock View': 'Tồn kho',
@@ -338,6 +354,22 @@ const translations: Record<Language, Record<string, string>> = {
     'units': 'đơn vị',
     'Manual Stock': 'Kho thủ công',
     'No recipe defined': 'Chưa có công thức',
+    // Categories
+    'Pantry': 'Đồ khô / Gia vị',
+    'Dairy': 'Sữa & Chế phẩm',
+    'Produce': 'Rau củ quả',
+    'Packaging': 'Bao bì',
+    'Meat': 'Thịt',
+    'Seafood': 'Hải sản',
+    'Beverages': 'Đồ uống',
+
+    // Payment Modal
+    'Confirm Payment': 'Xác nhận thanh toán',
+    'Total to Pay': 'Tổng tiền thanh toán',
+    'Order #': 'Đơn hàng #',
+    'View': 'Xem',
+    'Auto Print Receipt': 'Tự động in hóa đơn',
+    'Complete Order': 'Hoàn tất đơn hàng',
 
     // Settings
     'System Settings': 'Cài đặt hệ thống',
