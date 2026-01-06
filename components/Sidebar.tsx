@@ -18,7 +18,7 @@ import {
 } from 'lucide-react';
 import { View } from '../types';
 import { supabase } from '../supabase';
-import { useTheme } from '../ThemeContext';
+import { useTheme } from '../ThemeContext'; 
 
 interface SidebarProps {
   currentView: View;
