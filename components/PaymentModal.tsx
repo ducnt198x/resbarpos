@@ -11,7 +11,7 @@ interface PaymentModalProps {
   onPrint: () => void; // Giữ nguyên để test in lẻ
   totalAmount: number;
   orderId: string;
-  isProcessing: boolean; 
+  isProcessing: boolean;
 }
 
 export const PaymentModal: React.FC<PaymentModalProps> = ({
@@ -26,12 +26,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
   const { formatPrice } = useCurrency();
   const { t } = useTheme();
   const [method, setMethod] = useState<'Cash' | 'Card' | 'Transfer'>('Cash');
-
+  
   // State mới: Mặc định là CÓ in (true), nhưng ưu tiên lấy từ LocalStorage
   const [shouldPrint, setShouldPrint] = useState(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('pos_auto_print');
-      return saved !== null ? saved === 'true' : true;
+        const saved = localStorage.getItem('pos_auto_print');
+        return saved !== null ? saved === 'true' : true;
     }
     return true;
   });
@@ -51,38 +51,38 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
         <div className="p-6 border-b border-border flex justify-between items-center">
           <h3 className="font-bold text-text-main text-xl">{t('Confirm Payment')}</h3>
           <button onClick={onClose} disabled={isProcessing}>
-            <X size={20} className="text-secondary hover:text-text-main" />
+            <X size={20} className="text-secondary hover:text-text-main"/>
           </button>
         </div>
-
+        
         {/* Body */}
         <div className="p-6 space-y-6">
           <div className="text-center relative">
             <p className="text-secondary text-sm mb-1">{t('Total to Pay')}</p>
             <p className="text-4xl font-bold text-text-main">{formatPrice(totalAmount)}</p>
             <p className="text-sm text-secondary mt-2">{t('Order #')}{orderId}</p>
-
+            
             {/* Nút in lẻ (Test) */}
-            <button
+            <button 
               onClick={onPrint}
               className="absolute right-0 top-1/2 -translate-y-1/2 p-2 bg-surface border border-border rounded-lg text-secondary hover:text-text-main hover:border-primary transition-colors flex flex-col items-center gap-1"
               title="Print Preview"
             >
-              <Printer size={16} />
-              <span className="text-[10px] font-bold">{t('View')}</span>
+                <Printer size={16} />
+                <span className="text-[10px] font-bold">{t('View')}</span>
             </button>
           </div>
 
           {/* Payment Methods */}
           <div className="grid grid-cols-3 gap-3">
             {['Cash', 'Card', 'Transfer'].map((m) => (
-              <button
-                key={m}
-                onClick={() => setMethod(m as any)}
+              <button 
+                key={m} 
+                onClick={() => setMethod(m as any)} 
                 disabled={isProcessing}
                 className={`flex flex-col items-center justify-center p-4 rounded-xl border transition-all ${method === m ? 'bg-primary text-background border-primary' : 'bg-background border-border text-secondary hover:border-primary/50'}`}
               >
-                {m === 'Cash' ? <DollarSign size={24} /> : m === 'Card' ? <CreditCard size={24} /> : <ArrowRightLeft size={24} />}
+                {m === 'Cash' ? <DollarSign size={24}/> : m === 'Card' ? <CreditCard size={24}/> : <ArrowRightLeft size={24}/>}
                 <span className="text-xs font-bold mt-2">{t(m)}</span>
               </button>
             ))}
@@ -94,25 +94,25 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({
               <div className={`w-6 h-6 rounded border flex items-center justify-center transition-all ${shouldPrint ? 'bg-primary border-primary text-background' : 'border-gray-300 dark:border-white/20 text-transparent'}`}>
                 <Check size={16} strokeWidth={4} />
               </div>
-              <input
-                type="checkbox"
-                className="hidden"
-                checked={shouldPrint}
+              <input 
+                type="checkbox" 
+                className="hidden" 
+                checked={shouldPrint} 
                 onChange={handleTogglePrint}
               />
               <span className={`font-bold transition-colors ${shouldPrint ? 'text-text-main' : 'text-gray-800 dark:text-white'}`}>
                 {t('Auto Print Receipt')}
               </span>
-              <Printer size={16} className={shouldPrint ? 'text-primary' : 'text-gray-400 dark:text-gray-600'} />
+              <Printer size={16} className={shouldPrint ? 'text-primary' : 'text-gray-400 dark:text-gray-600'}/>
             </label>
           </div>
         </div>
 
         {/* Footer Action */}
         <div className="p-6 border-t border-border">
-          <button
+          <button 
             // Truyền cả method và shouldPrint ra ngoài
-            onClick={() => onConfirm(method, shouldPrint)}
+            onClick={() => onConfirm(method, shouldPrint)} 
             disabled={isProcessing}
             className="w-full py-4 bg-primary text-background font-bold rounded-xl text-lg hover:bg-primary-hover shadow-lg shadow-primary/20 flex items-center justify-center gap-2 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
           >
