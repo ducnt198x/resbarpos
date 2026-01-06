@@ -13,7 +13,7 @@ interface ThemeContextType {
   t: (key: string) => string;
 }
 
-const translations: Record<Language, Record<string, string>> = {
+const translations: Record<Language, Record<string, string>> = { 
   en: {
     // Sidebar
     'Home': 'Home',
