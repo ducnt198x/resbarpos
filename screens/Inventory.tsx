@@ -304,12 +304,14 @@ export const Inventory: React.FC = () => {
                       value={formData.category}
                       onChange={(e) => setFormData({...formData, category: e.target.value})}
                     >
-                      <option value="Pantry">Pantry</option>
-                      <option value="Dairy">Dairy</option>
-                      <option value="Produce">Produce</option>
-                      <option value="Coffee">Coffee</option>
-                      <option value="Packaging">Packaging</option>
-                      <option value="Meat">Meat</option>
+                      <option value="Pantry">{t('Pantry')}</option>
+                      <option value="Dairy">{t('Dairy')}</option>
+                      <option value="Produce">{t('Produce')}</option>
+                      <option value="Coffee">{t('Coffee')}</option>
+                      <option value="Packaging">{t('Packaging')}</option>
+                      <option value="Meat">{t('Meat')}</option>
+                      <option value="Seafood">{t('Seafood')}</option>
+                      <option value="Beverages">{t('Beverages')}</option>
                     </select>
                   </div>
 
@@ -366,7 +368,7 @@ export const Inventory: React.FC = () => {
                                     </div>
                                     <div>
                                     <p className="font-bold text-text-main">{item.name}</p>
-                                    <p className="text-xs text-secondary">{item.category}</p>
+                                    <p className="text-xs text-secondary">{t(item.category)}</p>
                                     </div>
                                 </div>
                             </td>
@@ -395,7 +397,7 @@ export const Inventory: React.FC = () => {
                               <tr key={item.id} className="hover:bg-border/30 transition-colors">
                                   <td className="px-6 py-4">
                                       <p className="font-bold text-text-main">{item.name}</p>
-                                      <p className="text-xs text-secondary">{item.category}</p>
+                                      <p className="text-xs text-secondary">{t(item.category)}</p>
                                   </td>
                                   <td className="px-6 py-4">
                                       {item.theoreticalYield === -1 ? (
