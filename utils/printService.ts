@@ -3,7 +3,7 @@ import { Order } from '../types';
 // Helper: Format tiền tệ VNĐ chuẩn
 const formatMoney = (amount: number) => {
   return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
-};
+}; 
 
 // Helper: Format ngày giờ
 const formatDate = (dateString?: string) => {
