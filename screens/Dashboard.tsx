@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { DollarSign, Receipt, ShoppingBag, Loader2, Wallet, Users, Calendar, Filter } from 'lucide-react';
 import { useCurrency } from '../CurrencyContext';
 import { useTheme } from '../ThemeContext';
-import { supabase } from '../supabase';
+import { supabase } from '../supabase'; 
 
 type FilterType = 'today' | 'week' | 'month' | 'custom';
 
