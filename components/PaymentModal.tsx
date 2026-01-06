@@ -11,7 +11,7 @@ interface PaymentModalProps {
   onPrint: () => void; // Giữ nguyên để test in lẻ
   totalAmount: number;
   orderId: string;
-  isProcessing: boolean;
+  isProcessing: boolean; 
 }
 
 export const PaymentModal: React.FC<PaymentModalProps> = ({
