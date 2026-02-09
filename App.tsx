@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Dashboard } from './screens/Dashboard';
 import { Menu } from './screens/Menu';
@@ -7,55 +6,76 @@ import { FloorPlan } from './screens/FloorPlan';
 import { Inventory } from './screens/Inventory';
 import { Settings } from './screens/Settings';
 import { Login } from './screens/Login';
-import { Orders } from './screens/Orders';
+import { Reports } from './screens/Reports';
 import { View } from './types';
 import { CurrencyProvider } from './CurrencyContext';
 import { ThemeProvider, useTheme } from './ThemeContext';
-import { supabase } from './supabase';
+import { NetworkProvider } from './context/NetworkContext';
+import { AuthProvider, useAuth } from './AuthContext';
+import { DataProvider } from './context/DataContext';
+import { DBProvider } from './context/DBProvider';
+import { SettingsProvider, useSettingsContext } from './context/SettingsContext';
+import { PrintPreviewProvider } from './context/PrintPreviewContext';
+import { PrintPreviewModal } from './components/PrintPreviewModal';
+import { ToastProvider } from './context/ToastContext';
+import { LockScreen } from './components/LockScreen';
 
-function AppContent() {
-  const [currentView, setCurrentView] = useState<View>('login');
+function AppContent({ currentView, setCurrentView }: { currentView: View, setCurrentView: (v: View) => void }) {
+  const { user, role, loading } = useAuth();
   const { brightness } = useTheme();
+  const { settings } = useSettingsContext();
 
+  // --- SECURITY: REDIRECT RESTRICTED VIEWS ---
   useEffect(() => {
-    const checkUser = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        handleRedirectAfterLogin(session.user);
+    if (role === 'staff' && currentView === 'inventory') {
+      setCurrentView('menu');
+    }
+  }, [role, currentView, setCurrentView]);
+
+  // --- GLOBAL SHORTCUTS ---
+  useEffect(() => {
+    if (!settings.enableShortcuts) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore F-keys if user is typing in an input field (optional, but good UX)
+      // However, spec says "REAL global shortcuts", usually implied to override unless strictly text input.
+      // Let's allow F2/F3 everywhere for quick context switching.
+      
+      if (e.key === 'F2') {
+        e.preventDefault();
+        if (currentView !== 'floorplan') {
+          setCurrentView('floorplan');
+          // Delay dispatch to allow component to mount/render
+          setTimeout(() => window.dispatchEvent(new CustomEvent('pos:shortcut:pay')), 100);
+        } else {
+          window.dispatchEvent(new CustomEvent('pos:shortcut:pay'));
+        }
+      } 
+      else if (e.key === 'F3') {
+        e.preventDefault();
+        if (currentView !== 'menu') {
+          setCurrentView('menu');
+          // Delay dispatch to allow component to mount/render
+          setTimeout(() => window.dispatchEvent(new CustomEvent('pos:shortcut:focusSearch')), 100);
+        } else {
+          window.dispatchEvent(new CustomEvent('pos:shortcut:focusSearch'));
+        }
+      }
+      else if (e.key === 'Escape') {
+        // Dispatch close modal event
+        window.dispatchEvent(new CustomEvent('pos:shortcut:closeModal'));
       }
     };
 
-    checkUser();
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [settings.enableShortcuts, currentView, setCurrentView]);
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session) {
-        handleRedirectAfterLogin(session.user);
-      } else {
-        setCurrentView('login');
-      }
-    });
+  if (loading) return null;
 
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const handleRedirectAfterLogin = async (user: any) => {
-    if (user.email === 'ducnt198x@gmail.com') {
-      setCurrentView('dashboard');
-      return;
-    }
-
-    const { data: profile } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', user.id)
-      .single();
-
-    if (profile?.role === 'admin') {
-      setCurrentView('dashboard');
-    } else {
-      setCurrentView('floorplan');
-    }
-  };
+  if (!user) {
+    return <Login onLogin={() => {}} />;
+  }
 
   const renderView = () => {
     switch (currentView) {
@@ -65,23 +85,20 @@ function AppContent() {
         return <Menu />;
       case 'floorplan':
         return <FloorPlan />;
-      case 'orders':
-         return <Orders />;
+      case 'reports':
+         return <Reports />;
       case 'inventory':
+        if (role === 'staff') return <Menu />;
         return <Inventory />;
       case 'settings':
         return <Settings onLogout={() => setCurrentView('login')} />;
       default:
-        return <FloorPlan />;
+        return <Menu />;
     }
   };
 
-  if (currentView === 'login') {
-    return <Login onLogin={() => {}} />; // Redirection is handled by auth listener
-  }
-
   return (
-    <div className="flex flex-col lg:flex-row h-screen w-full bg-background text-text-main overflow-hidden relative">
+    <div className="flex flex-col lg:flex-row h-screen w-full bg-background text-text-main overflow-hidden relative transition-colors duration-300">
       <div 
         className="fixed inset-0 z-[9999] bg-black pointer-events-none transition-opacity duration-300"
         style={{ opacity: (100 - brightness) / 100 }}
@@ -90,15 +107,35 @@ function AppContent() {
       <main className="flex-1 flex flex-col h-full overflow-hidden relative pb-[70px] lg:pb-0 w-full transition-all duration-300">
         {renderView()}
       </main>
+      
+      {/* Global Modals */}
+      <PrintPreviewModal />
+      <LockScreen />
     </div>
   );
 }
 
 function App() {
+  const [currentView, setCurrentView] = React.useState<View>('floorplan');
+
   return (
     <ThemeProvider>
       <CurrencyProvider>
-        <AppContent />
+        <AuthProvider>
+          <ToastProvider>
+            <DBProvider>
+              <NetworkProvider>
+                <SettingsProvider>
+                  <PrintPreviewProvider>
+                    <DataProvider>
+                      <AppContent currentView={currentView} setCurrentView={setCurrentView} />
+                    </DataProvider>
+                  </PrintPreviewProvider>
+                </SettingsProvider>
+              </NetworkProvider>
+            </DBProvider>
+          </ToastProvider>
+        </AuthProvider>
       </CurrencyProvider>
     </ThemeProvider>
   );

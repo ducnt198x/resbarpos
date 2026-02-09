@@ -1,5 +1,5 @@
 {
-  "name": "restaurant-pos",
+  "name": "restaurant-bar-pos",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -15,7 +15,10 @@
     "recharts": "2.15.0",
     "reselect": "5.1.0",
     "@supabase/supabase-js": "2.39.0",
-    "react-to-print": "3.0.2"
+    "react-to-print": "3.0.2",
+    "dexie": "4.0.1",
+    "dexie-react-hooks": "1.1.7",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
