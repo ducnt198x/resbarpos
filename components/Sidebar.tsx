@@ -1,8 +1,8 @@
+
 import React, { useEffect, useState, useRef } from 'react';
 import { 
   LayoutDashboard, 
   UtensilsCrossed, 
-  Receipt, 
   Grid, 
   Package, 
   Settings, 
@@ -14,11 +14,13 @@ import {
   ShieldCheck,
   Save,
   Loader2,
-  MoreHorizontal
+  MoreHorizontal,
+  BarChart3
 } from 'lucide-react';
 import { View } from '../types';
 import { supabase } from '../supabase';
 import { useTheme } from '../ThemeContext';
+import { useAuth } from '../AuthContext';
 
 interface SidebarProps {
   currentView: View;
@@ -34,7 +36,8 @@ interface NavItem {
 
 export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) => {
   const { t } = useTheme();
-  const [role, setRole] = useState<'admin' | 'staff'>('staff');
+  const { user, role, signOut } = useAuth();
+  
   const [userName, setUserName] = useState('');
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [pendingCount, setPendingCount] = useState(0);
@@ -48,25 +51,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
 
   useEffect(() => {
     const fetchUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        let userRole: 'admin' | 'staff' = 'staff';
-        let displayName = user.user_metadata?.full_name || user.email; 
+        let displayName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'User'; 
         let displayAvatar = user.user_metadata?.avatar_url 
             ? `${user.user_metadata.avatar_url}?t=${new Date().getTime()}` 
             : null;
 
-        if (user.email === 'ducnt198x@gmail.com') {
-            userRole = 'admin';
+        // Try fetching updated profile from 'users' table
+        try {
+            const { data: profile } = await supabase.from('users').select('avatar_url, full_name').eq('id', user.id).single();
+            if (profile) {
+                if (profile.full_name) displayName = profile.full_name;
+                if (profile.avatar_url) displayAvatar = `${profile.avatar_url}?t=${new Date().getTime()}`;
+            }
+        } catch (e) {
+            // Ignore error if profile table row doesn't exist yet
         }
-
-        const { data: profile } = await supabase.from('users').select('role, avatar_url, full_name').eq('id', user.id).single();
-        if (profile) {
-            if (user.email !== 'ducnt198x@gmail.com') userRole = profile.role || 'staff';
-            if (profile.full_name) displayName = profile.full_name;
-            if (profile.avatar_url) displayAvatar = `${profile.avatar_url}?t=${new Date().getTime()}`;
-        }
-        setRole(userRole);
+        
         setUserName(displayName || ''); 
         setAvatarUrl(displayAvatar);
       }
@@ -74,14 +75,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
     fetchUser();
 
     const fetchPendingOrders = async () => {
-        const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true }).eq('status', 'Pending'); 
+        const { count } = await supabase.from('orders').select('*', { count: 'exact', head: true }).in('status', ['Pending', 'Cooking', 'Ready']); 
         setPendingCount(count || 0);
     };
     fetchPendingOrders(); 
 
     const orderChannel = supabase.channel('sidebar-orders-counter').on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, fetchPendingOrders).subscribe();
     return () => { supabase.removeChannel(orderChannel); };
-  }, []);
+  }, [user]);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -89,38 +90,59 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
   };
 
   const handleSaveChanges = async () => {
-    if (!selectedFile) return;
+    if (!user) return;
     setIsSaving(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
+      let publicUrl = avatarUrl;
+      
+      // Upload new avatar if selected
+      if (selectedFile) {
         const fileExt = selectedFile.name.split('.').pop();
         const fileName = `${user.id}-${Date.now()}.${fileExt}`;
         const { error: uploadError } = await supabase.storage.from('avatars').upload(fileName, selectedFile, { upsert: true });
         if (uploadError) throw uploadError;
-        const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(fileName);
-        await supabase.auth.updateUser({ data: { avatar_url: publicUrl } });
-        await supabase.from('users').upsert({ id: user.id, avatar_url: publicUrl, email: user.email, full_name: userName, role: role });
-        await supabase.auth.refreshSession();
-        setAvatarUrl(`${publicUrl}?t=${new Date().getTime()}`); setSelectedFile(null); setPreviewUrl(null); setShowProfileModal(false);
+        const { data } = supabase.storage.from('avatars').getPublicUrl(fileName);
+        publicUrl = data.publicUrl;
       }
-    } catch (error: any) { alert("Error: " + error.message); } finally { setIsSaving(false); }
+
+      // Update Auth Metadata
+      await supabase.auth.updateUser({ data: { avatar_url: publicUrl, full_name: userName } });
+      
+      // Update Public Profile Table (Keep role as is, don't overwrite)
+      await supabase.from('users').upsert({ 
+          id: user.id, 
+          avatar_url: publicUrl, 
+          email: user.email, 
+          full_name: userName,
+          // Only update role if it's missing in DB, otherwise preserve existing logic (handled by RLS/Trigger usually)
+          // For now, we omit 'role' to avoid resetting it to something else or needing permission
+      });
+      
+      setAvatarUrl(publicUrl ? `${publicUrl}?t=${new Date().getTime()}` : null); 
+      setSelectedFile(null); 
+      setPreviewUrl(null); 
+      setShowProfileModal(false);
+      
+    } catch (error: any) { 
+        alert("Error: " + error.message); 
+    } finally { 
+        setIsSaving(false); 
+    }
   };
 
   const handleCloseModal = () => { setShowProfileModal(false); setSelectedFile(null); setPreviewUrl(null); };
 
-  // Reordered Navigation Items based on user priority
   const mainItems: NavItem[] = [
-    ...(role === 'admin' ? [{ id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' }] : []),
-    { id: 'floorplan', icon: Grid, label: 'Tables' },
+    { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard', badge: pendingCount },
     { id: 'menu', icon: UtensilsCrossed, label: 'Menu' },
-    { id: 'orders', icon: Receipt, label: 'Orders', badge: pendingCount > 0 ? pendingCount : undefined },
-    ...(role === 'admin' ? [{ id: 'inventory', icon: Package, label: 'Stock' }] : []),
+    { id: 'floorplan', icon: Grid, label: 'Tables' },
+    { id: 'reports', icon: BarChart3, label: 'Reports' }, 
     { id: 'settings', icon: Settings, label: 'Settings' }
   ];
 
-  // Secondary items are now empty as Inventory was moved up to Main
-  const secondaryItems: NavItem[] = [];
+  const secondaryItems: NavItem[] = role === 'staff' ? [] : [
+    { id: 'inventory', icon: Package, label: 'Stock' }
+  ];
 
   const handleMobileNavClick = (view: View) => { onChangeView(view); setShowMobileMoreMenu(false); }
 
@@ -133,13 +155,14 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
           className={
             isMobile 
               ? `flex flex-col items-center justify-center w-full h-full gap-1 active:scale-90 transition-transform relative ${isActive ? 'text-primary' : 'text-secondary'}`
-              : `flex items-center gap-3 px-3 py-3 rounded-lg transition-all group w-full text-left relative ${isActive ? 'bg-primary/10 text-primary border-primary/20' : 'hover:bg-surface text-secondary hover:text-text-main'}`
+              : `flex items-center gap-3 px-3 rounded-lg transition-all group w-full text-left relative ${isActive ? 'bg-primary/10 text-primary border-primary/20' : 'hover:bg-surface text-secondary hover:text-text-main'}`
           }
+          style={!isMobile ? { minHeight: 'var(--pos-btn-h)' } : {}}
         >
           {isMobile ? (
              <div className={`relative p-1 rounded-xl ${isActive ? 'bg-primary/10' : ''}`}>
                <item.icon size={24} strokeWidth={isActive ? 2.5 : 2} />
-               {item.badge && <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full animate-pulse border border-background">{item.badge}</span>}
+               {item.badge ? <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold w-4 h-4 flex items-center justify-center rounded-full animate-pulse border border-background">{item.badge}</span> : null}
              </div>
           ) : (
             <div className="relative">
@@ -151,11 +174,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
             {t(item.label)}
           </span>
           
-          {!isMobile && item.badge && (
+          {!isMobile && item.badge ? (
             <span className="ml-auto bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse shadow-sm shadow-red-500/50">
                {item.badge}
             </span>
-          )}
+          ) : null}
         </button>
      );
   };
@@ -163,12 +186,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
   return (
     <>
       <nav className="fixed bottom-0 left-0 w-full bg-background/95 backdrop-blur-md border-t border-border flex justify-around items-center h-[70px] z-50 px-2 pb-safe lg:hidden transition-colors">
-        {/* Only show first 4 items in mobile bottom bar, rest go to "More" */}
         {mainItems.slice(0, 4).map(item => renderIconNav(item, true))}
         
         <button 
           onClick={() => setShowMobileMoreMenu(true)} 
-          className={`flex flex-col items-center justify-center w-full h-full gap-1 active:scale-90 transition-transform ${mainItems.slice(4).some(i => i.id === currentView) ? 'text-primary' : 'text-secondary'}`}
+          className={`flex flex-col items-center justify-center w-full h-full gap-1 active:scale-90 transition-transform ${[...secondaryItems, ...mainItems.slice(4)].some(i => i.id === currentView) ? 'text-primary' : 'text-secondary'}`}
         >
           <div className="p-1">
              {avatarUrl ? (
@@ -188,14 +210,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
               <ChefHat size={24} strokeWidth={2.5} />
             </div>
             <div className="flex flex-col">
-              <h1 className="text-text-main text-lg font-bold leading-tight">ResBar POS</h1>
+              <h1 className="text-text-main text-lg font-bold leading-tight">Nepos</h1>
               <p className="text-secondary text-xs font-medium">{t('Main Branch')}</p>
             </div>
           </div>
         </div>
 
-        <nav className="flex-1 px-4 py-6 flex flex-col gap-2 overflow-y-auto custom-scrollbar">
-          {mainItems.map(item => renderIconNav(item, false))}
+        <nav 
+          className="flex-1 px-4 py-6 flex flex-col overflow-y-auto custom-scrollbar"
+          style={{ gap: 'var(--pos-gap)' }}
+        >
+          {[...mainItems, ...secondaryItems].map(item => renderIconNav(item, false))}
         </nav>
 
         <div className="p-4 border-t border-border mt-auto">
@@ -217,10 +242,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
           </div>
           <button 
             onClick={async () => {
-              await supabase.auth.signOut();
+              await signOut();
               onChangeView('login');
             }}
             className="flex w-full items-center gap-3 px-3 py-2 text-secondary hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+            style={{ minHeight: 'var(--pos-btn-h)' }}
           >
             <LogOut size={20} />
             <span className="text-sm font-medium">{t('Logout')}</span>
@@ -245,7 +271,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                {mainItems.slice(4).map(item => (
+                {[...mainItems.slice(4), ...secondaryItems].map(item => (
                   <button
                     key={item.id}
                     onClick={() => handleMobileNavClick(item.id as View)}
@@ -264,7 +290,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
               
               <button 
                   onClick={async () => {
-                    await supabase.auth.signOut();
+                    await signOut();
                     onChangeView('login');
                   }}
                   className="w-full py-3 mt-2 bg-red-500/10 text-red-500 rounded-xl font-bold flex items-center justify-center gap-2"
@@ -311,11 +337,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
                   <User size={18} className="text-secondary"/>
                   <div className="overflow-hidden">
                      <p className="text-[10px] text-secondary uppercase font-bold">Full Name</p>
-                     <p className="text-sm text-text-main font-bold truncate">{userName}</p>
+                     <input 
+                        value={userName}
+                        onChange={(e) => setUserName(e.target.value)}
+                        className="text-sm text-text-main font-bold bg-transparent outline-none w-full border-b border-transparent focus:border-primary/50 transition-colors"
+                        placeholder="Enter name"
+                     />
                   </div>
                </div>
                
-               {selectedFile ? (
+               {selectedFile || userName !== (user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'User') ? (
                   <div className="flex gap-2">
                       <button 
                           onClick={() => { setSelectedFile(null); setPreviewUrl(null); }}
@@ -337,7 +368,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
                   <>
                       <button 
                           onClick={() => fileInputRef.current?.click()}
-                          className="w-full py-3 bg-surface border border-border text-text-main font-bold rounded-xl hover:bg-border flex items-center justify-center gap-2 transition-colors"
+                          className="w-full py-3 bg-surface border border-border text-text-main font-bold rounded-xl hover:bg-border flex items-center justify-center gap-2 transition-all"
                       >
                           <Upload size={18} /> Change Avatar
                       </button>
@@ -357,3 +388,4 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView }) =
     </>
   );
 };
+    

@@ -1,7 +1,10 @@
+
 import React, { useState, useMemo } from 'react';
 import { X, ArrowRight, ArrowRightLeft, Users, Check, Loader2 } from 'lucide-react';
-import { TableData } from '../screens/FloorPlan';
+// Corrected import to use central types file instead of screens/FloorPlan
+import { TableData } from '../types';
 import { useTheme } from '../ThemeContext';
+import { useSettingsContext } from '../context/SettingsContext';
 
 interface TransferModalProps {
   isOpen: boolean;
@@ -21,6 +24,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
   isProcessing
 }) => {
   const { t } = useTheme();
+  const { can } = useSettingsContext();
   const [mode, setMode] = useState<'move' | 'merge'>('move');
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
 
@@ -50,6 +54,8 @@ export const TransferModal: React.FC<TransferModalProps> = ({
 
   if (!isOpen) return null;
 
+  const canMerge = can('bill.merge');
+
   return (
     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
       <div className="bg-surface border border-border rounded-2xl w-full max-w-md shadow-2xl flex flex-col overflow-hidden max-h-[80vh]">
@@ -71,13 +77,16 @@ export const TransferModal: React.FC<TransferModalProps> = ({
           >
             <ArrowRight size={18} /> {t('Move Table')}
           </button>
-          <button
-            onClick={() => { setMode('merge'); setSelectedTargetId(null); }}
-            className={`flex-1 py-2.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all
-              ${mode === 'merge' ? 'bg-primary text-background shadow-md' : 'text-secondary hover:bg-surface'}`}
-          >
-            <Users size={18} /> {t('Merge Table')}
-          </button>
+          
+          {canMerge && (
+            <button
+              onClick={() => { setMode('merge'); setSelectedTargetId(null); }}
+              className={`flex-1 py-2.5 rounded-lg font-bold text-sm flex items-center justify-center gap-2 transition-all
+                ${mode === 'merge' ? 'bg-primary text-background shadow-md' : 'text-secondary hover:bg-surface'}`}
+            >
+              <Users size={18} /> {t('Merge Table')}
+            </button>
+          )}
         </div>
 
         {/* Content Body */}

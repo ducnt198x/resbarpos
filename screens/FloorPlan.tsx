@@ -1,820 +1,977 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { 
-  Plus, Layout, Save, Move, ShoppingBag, Trash2, CreditCard, Printer, 
-  Armchair, ChefHat, Loader2, Minus, Square, Circle, RectangleHorizontal, 
-  X, Users, Type, AlertTriangle, Maximize2, ArrowRightLeft, Check, Grid, MoreHorizontal
+
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import {
+  Loader2, Ban, Save, Layout, Type, Trash2, Square, Circle, RectangleHorizontal,
+  Users, Minus, Plus, Maximize2, Armchair, X, ArrowRight, ArrowRightLeft, Search,
+  Utensils, ShoppingBag, StickyNote, ChevronRight, Check, RefreshCw, CreditCard, ArrowLeft
 } from 'lucide-react';
-import { useCurrency } from '../CurrencyContext';
+import { useData } from '../context/DataContext';
 import { useTheme } from '../ThemeContext';
-import { supabase } from '../supabase';
-import { MenuItem } from '../types';
-import { PaymentModal } from '../components/PaymentModal';
+import { useSettingsContext } from '../context/SettingsContext';
+import { TableData, MenuItem, OrderItem } from '../types';
+import { useOrderOperations } from '../hooks/useOrderOperations';
 import { TransferModal } from '../components/TransferModal';
-import { processOrderCompletion } from '../utils';
-import { printOrderReceipt } from '../utils/printService';
-
-// Local types
-interface OrderItem { id: number; name: string; price: number; qty: number; isNew?: boolean; }
-export type TableStatus = 'Available' | 'Occupied' | 'Reserved';
-export type TableShape = 'square' | 'round' | 'rect';
-export interface TableData { id: string; label: string; shape: TableShape; x: number; y: number; width: number; height: number; seats: number; status: TableStatus; guests?: number; orderId?: string; orderStatus?: string; orderTotal?: number; items: OrderItem[]; waiter?: string; timeElapsed?: string; }
-
-const TABLE_TEMPLATES = [
-  { label: 'Round (2)', shape: 'round', width: 80, height: 80, seats: 2, icon: Circle },
-  { label: 'Square (4)', shape: 'square', width: 100, height: 100, seats: 4, icon: Square },
-  { label: 'Rect (4)', shape: 'rect', width: 120, height: 80, seats: 4, icon: RectangleHorizontal },
-  { label: 'Large (6)', shape: 'rect', width: 160, height: 90, seats: 6, icon: RectangleHorizontal },
-  { label: 'Big Round (8)', shape: 'round', width: 140, height: 140, seats: 8, icon: Circle },
-  { label: 'Bar (5)', shape: 'rect', width: 200, height: 60, seats: 5, icon: RectangleHorizontal },
-];
+import { PaymentModal } from '../components/PaymentModal';
+import { enrichOrderDetails, getPaidAmount } from '../utils/orderHelpers';
+import { printOrderReceipt, generateReceiptHTML, isSandboxed } from '../services/printService';
+import { useCurrency } from '../CurrencyContext';
+import { useAuth } from '../AuthContext';
+import { useToast } from '../context/ToastContext';
+import { usePrintPreview } from '../context/PrintPreviewContext';
+import { ConfirmModal } from '../components/ConfirmModal';
 
 export const FloorPlan: React.FC = () => {
-  const { formatPrice } = useCurrency();
+  const { tables, orders, menuItems, refreshData, addLocalOrder, addItemToSession, checkoutSession, updateLocalOrder, cancelOrder, loading, moveTable, mergeOrders, saveTableLayout } = useData();
+  const { performCancelOrder } = useOrderOperations();
   const { t } = useTheme();
-  const [tables, setTables] = useState<TableData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { settings, can } = useSettingsContext();
+  const { formatPrice } = useCurrency();
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const { openPreview } = usePrintPreview();
+
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
-  const [role, setRole] = useState<'admin' | 'staff'>('staff');
-  
-  // --- EDIT MODE & DIRTY STATE ---
   const [editingTableId, setEditingTableId] = useState<string | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Drag/Resize State
-  const containerRef = useRef<HTMLDivElement>(null);
-  const tablesRef = useRef<TableData[]>([]); 
-  
-  const dragState = useRef<{ 
-    activeId: string | null; 
-    mode: 'move' | 'resize' | null; 
-    startX: number; 
-    startY: number; 
-    initialX: number; 
-    initialY: number; 
-    initialW: number; 
-    initialH: number; 
-    containerW: number; 
-    containerH: number; 
-    offsetX: number; 
-    offsetY: number;
-  }>({ 
-    activeId: null, mode: null, startX: 0, startY: 0, 
-    initialX: 0, initialY: 0, initialW: 0, initialH: 0, 
-    containerW: 0, containerH: 0, offsetX: 0, offsetY: 0,
-  });
-  
-  const [activeInteractionId, setActiveInteractionId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Modal States
-  const [showMenuModal, setShowMenuModal] = useState(false);
-  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
-  const [menuSearch, setMenuSearch] = useState('');
-  const [menuCategory, setMenuCategory] = useState('All');
+  const [isAddItemsModalOpen, setIsAddItemsModalOpen] = useState(false);
+  const [addItemsSearch, setAddItemsSearch] = useState('');
   const [currentOrderItems, setCurrentOrderItems] = useState<OrderItem[]>([]);
-  const [guestCount, setGuestCount] = useState<number>(1);
-  
-  // Payment States
+
+  const [isNoteModalOpen, setIsNoteModalOpen] = useState(false);
+  const [editingNoteItem, setEditingNoteItem] = useState<{ idx: number, currentNote: string, source: 'cart' | 'active' | 'add_items' } | null>(null);
+  const [noteInput, setNoteInput] = useState("");
+
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
-
-  // Transfer/Merge States
   const [showTransferModal, setShowTransferModal] = useState(false);
-  const [isProcessingTransfer, setIsProcessingTransfer] = useState(false);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+  const [modifiedItems, setModifiedItems] = useState<OrderItem[] | null>(null);
 
-  useEffect(() => { tablesRef.current = tables; }, [tables]);
-  
-  // Reset guest count when table selection changes
-  useEffect(() => {
-      if (selectedTableId) {
-          const table = tables.find(t => t.id === selectedTableId);
-          if (table) {
-              setGuestCount(table.guests && table.guests > 0 ? table.guests : 1);
-          }
-      }
-  }, [selectedTableId, tables]);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [localTables, setLocalTables] = useState<TableData[]>([]);
 
-  useEffect(() => {
-    fetchUserRole(); 
-    fetchData();
+  // Delete confirmation (use the same popup style as order/item delete)
+  const [pendingDeleteTableId, setPendingDeleteTableId] = useState<string | null>(null);
 
-    // GLOBAL MOUSE EVENTS FOR DRAGGING (ONLY ACTIVE IN EDIT MODE)
-    const handleGlobalMouseMove = (e: MouseEvent) => { 
-        if (!isEditMode) return; // Strict Lock
+  const startInteractionSelectedRef = useRef<boolean>(false);
 
-        const { activeId, mode, containerW, containerH, offsetX, offsetY, startX, startY, initialW, initialH } = dragState.current;
-        if (!activeId || !mode) return;
+  useEffect(() => { if (!isEditMode && tables) setLocalTables(tables as TableData[]); }, [tables, isEditMode]);
 
-        if (mode === 'move') {
-            let xPx = e.clientX - (containerRef.current?.getBoundingClientRect().left || 0) - offsetX;
-            let yPx = e.clientY - (containerRef.current?.getBoundingClientRect().top || 0) - offsetY;
-            
-            const currentTable = tablesRef.current.find(t => t.id === activeId);
-            const tW = currentTable?.width || 100; 
-            const tH = currentTable?.height || 100;
-            xPx = Math.max(0, Math.min(xPx, containerW - tW)); 
-            yPx = Math.max(0, Math.min(yPx, containerH - tH));
-            
-            const xPerc = (xPx / containerW) * 100; 
-            const yPerc = (yPx / containerH) * 100;
-            
-            setTables(prev => prev.map(t => t.id === activeId ? { ...t, x: xPerc, y: yPerc } : t));
-        } else if (mode === 'resize') {
-             const deltaX = e.clientX - startX; 
-             const deltaY = e.clientY - startY;
-             const newWidth = Math.max(60, initialW + deltaX); 
-             const newHeight = Math.max(60, initialH + deltaY);
-             setTables(prev => prev.map(t => t.id === activeId ? { ...t, width: newWidth, height: newHeight } : t));
-        }
+  // --- CRUD Functions for Local Layout Editing ---
+  const updateTable = (id: string, updates: Partial<TableData>) => {
+    setLocalTables(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+    setHasUnsavedChanges(true);
+  };
+
+  const deleteTable = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+
+    const activeOrder = (orders || []).find(o => String(o.table_id) === String(id) && ['Pending', 'Cooking', 'Ready'].includes(o.status));
+    if (activeOrder) {
+      showToast(t('Cannot delete table with active order'), 'error');
+      return;
+    }
+
+    // Show confirmation popup (same style as order/item delete)
+    setPendingDeleteTableId(id);
+  };
+
+  const handleConfirmDeleteTable = () => {
+    if (!pendingDeleteTableId) return;
+    setLocalTables(prev => prev.filter(t => t.id !== pendingDeleteTableId));
+    setHasUnsavedChanges(true);
+    setEditingTableId(null);
+    if (selectedTableId === pendingDeleteTableId) setSelectedTableId(null);
+    setPendingDeleteTableId(null);
+    showToast(t('Deleted'), 'success');
+  };
+
+  const handleAddTable = () => {
+    const newId = crypto.randomUUID();
+    const newTable: TableData = {
+      id: newId,
+      label: `T-${localTables.length + 1}`,
+      x: 45, // Approximately center
+      y: 45,
+      width: 120, // Standard size
+      height: 120,
+      shape: 'round',
+      seats: 4,
+      status: 'Available'
     };
 
-    const handleGlobalMouseUp = async () => { 
-        if (!isEditMode) return;
-        const { activeId, mode } = dragState.current;
-        if (activeId && mode) {
-           setHasUnsavedChanges(true);
-        }
-        dragState.current = { ...dragState.current, activeId: null, mode: null }; 
-        setActiveInteractionId(null);
+    setLocalTables([...localTables, newTable]);
+    setHasUnsavedChanges(true);
+    setEditingTableId(newId);
+  };
+
+  const handleSaveLayout = async () => {
+    setIsSaving(true);
+    try {
+      await saveTableLayout(localTables);
+      setIsEditMode(false);
+      setHasUnsavedChanges(false);
+      showToast(t('Saved'), 'success');
+    } catch (e) {
+      console.error("Save layout failed", e);
+      showToast(t('Error'), 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // --- Handlers for Dragging ---
+  const handleMouseDownDrag = (e: React.MouseEvent, table: TableData) => {
+    if (!isEditMode) {
+      if (selectedTableId !== table.id) setSelectedTableId(table.id);
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation(); // Prevent container click
+
+    setEditingTableId(table.id);
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    const containerRect = container.getBoundingClientRect();
+    const startX = e.clientX;
+    const startY = e.clientY;
+
+    // Store initial percentage positions
+    const initialX = table.x || 0;
+    const initialY = table.y || 0;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const deltaX = ev.clientX - startX;
+      const deltaY = ev.clientY - startY;
+
+      // Convert pixels to percentage relative to container
+      const deltaXPercent = (deltaX / containerRect.width) * 100;
+      const deltaYPercent = (deltaY / containerRect.height) * 100;
+
+      // Calculate new position
+      const newX = Math.max(0, Math.min(100, initialX + deltaXPercent));
+      const newY = Math.max(0, Math.min(100, initialY + deltaYPercent));
+
+      setLocalTables(prev => prev.map(t =>
+        t.id === table.id ? { ...t, x: newX, y: newY } : t
+      ));
+      setHasUnsavedChanges(true);
     };
 
-    window.addEventListener('mousemove', handleGlobalMouseMove); 
-    window.addEventListener('mouseup', handleGlobalMouseUp);
-    
-    const channels = supabase.channel('floorplan-realtime')
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'tables' }, () => {
-             if (!isEditMode) fetchData();
-        })
-        .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => fetchData())
-        .subscribe();
-        
-    return () => { 
-        supabase.removeChannel(channels); 
-        window.removeEventListener('mousemove', handleGlobalMouseMove); 
-        window.removeEventListener('mouseup', handleGlobalMouseUp); 
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
     };
-  }, [isEditMode]);
 
-  const fetchUserRole = async () => { const { data: { user } } = await supabase.auth.getUser(); if (user) { if (user.email === 'ducnt198x@gmail.com') { setRole('admin'); } else { const { data } = await supabase.from('users').select('role').eq('id', user.id).single(); if (data) setRole(data.role); } } };
-  const fetchData = async () => { await Promise.all([fetchTables(), fetchMenuItems()]); setLoading(false); };
-  
-  const fetchTables = async () => {
-    if (hasUnsavedChanges && isEditMode) return;
-
-    const { data: tablesData } = await supabase.from('tables').select('*'); if (!tablesData) return;
-    const { data: activeOrders } = await supabase.from('orders').select(`id, table_id, status, created_at, staff_name, guests, total_amount, order_items (id, quantity, price, menu_item_id, menu_items (name))`).in('status', ['Pending', 'Cooking', 'Ready']); 
-    
-    const mergedTables: TableData[] = tablesData.map((t: any) => {
-        const activeOrder = activeOrders?.find((o: any) => o.table_id === t.id);
-        let items: OrderItem[] = [];
-        if (activeOrder && activeOrder.order_items) { items = activeOrder.order_items.map((oi: any) => { let itemName = 'Unknown'; if (oi.menu_items) { itemName = Array.isArray(oi.menu_items) ? oi.menu_items[0]?.name : oi.menu_items.name; } return { id: oi.menu_item_id, name: itemName || 'Unknown', price: oi.price, qty: oi.quantity }; }); }
-        return { id: t.id, label: t.label, shape: t.shape, x: Number(t.x), y: Number(t.y), width: Number(t.width), height: Number(t.height), seats: t.seats, status: activeOrder ? 'Occupied' : 'Available', guests: activeOrder ? (activeOrder.guests || 2) : 0, waiter: activeOrder?.staff_name || '', orderId: activeOrder?.id, orderStatus: activeOrder?.status, orderTotal: activeOrder?.total_amount || 0, items: items, timeElapsed: activeOrder ? getTimeElapsed(activeOrder.created_at) : undefined };
-    });
-    setTables(mergedTables);
-  };
-  
-  const fetchMenuItems = async () => { const { data } = await supabase.from('menu_items').select('*'); if (data) setMenuItems(data as MenuItem[]); };
-  const getTimeElapsed = (startTime: string) => { const start = new Date(startTime).getTime(); const now = new Date().getTime(); const diff = Math.floor((now - start) / 1000 / 60); return `${Math.floor(diff / 60)}:${(diff % 60).toString().padStart(2, '0')}`; };
-  
-  const selectedTable = useMemo(() => tables.find(t => t.id === selectedTableId), [tables, selectedTableId]);
-  const activeEditingTable = useMemo(() => tables.find(t => t.id === editingTableId), [tables, editingTableId]);
-  
-  const calculateTotal = (items: OrderItem[]) => items.reduce((acc, item) => acc + (item.price * item.qty), 0);
-  
-  // --- INTERACTIONS (Strict Mode Locking) ---
-  const handleTableDoubleClick = (e: React.MouseEvent, table: TableData) => { 
-      e.stopPropagation(); 
-      if (role !== 'admin') return; 
-      setIsEditMode(true); 
-      setEditingTableId(table.id); 
-      setSelectedTableId(table.id); 
-  };
-  
-  const handleTableClick = (e: React.MouseEvent, table: TableData) => { 
-      e.stopPropagation(); 
-      if (isEditMode) { 
-          setEditingTableId(table.id); 
-      } else { 
-          // LIVE MODE: Select table to show Floating Panel
-          setEditingTableId(null); 
-          setSelectedTableId(table.id); 
-      } 
-  };
-  
-  const handleMouseDownDrag = (e: React.MouseEvent, table: TableData) => { 
-      // STRICT LOCK: Absolutely no drag logic in Live Mode
-      if (!isEditMode) return; 
-
-      e.stopPropagation(); 
-      if (!containerRef.current) return; 
-      
-      const containerRect = containerRef.current.getBoundingClientRect(); 
-      const tableRect = e.currentTarget.getBoundingClientRect(); 
-      
-      dragState.current = { 
-          activeId: table.id, 
-          mode: 'move', 
-          startX: e.clientX, 
-          startY: e.clientY, 
-          initialX: table.x, 
-          initialY: table.y, 
-          initialW: table.width, 
-          initialH: table.height, 
-          containerW: containerRect.width, 
-          containerH: containerRect.height, 
-          offsetX: e.clientX - tableRect.left, 
-          offsetY: e.clientY - tableRect.top,
-      }; 
-      setEditingTableId(table.id);
-      setActiveInteractionId(table.id);
-  };
-  
-  const handleBackgroundClick = () => { 
-      if (isEditMode) { setEditingTableId(null); } else { setSelectedTableId(null); } 
-  };
-  
-  const handleResizeStart = (e: React.MouseEvent, table: TableData) => { 
-      e.stopPropagation(); e.preventDefault(); 
-      if (!isEditMode) return; 
-      dragState.current = { activeId: table.id, mode: 'resize', startX: e.clientX, startY: e.clientY, initialX: table.x, initialY: table.y, initialW: table.width, initialH: table.height, containerW: 0, containerH: 0, offsetX: 0, offsetY: 0 }; 
-      setActiveInteractionId(table.id); 
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   };
 
-  const handleUpdateGuestCount = async (delta: number) => {
-      const newCount = Math.max(1, guestCount + delta);
-      setGuestCount(newCount);
-      
-      if (selectedTable?.status === 'Occupied' && selectedTable.orderId) {
-          await supabase.from('orders').update({ guests: newCount }).eq('id', selectedTable.orderId);
-          fetchTables(); 
-      }
+  const handleResizeStart = (e: React.MouseEvent, table: TableData) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    const container = containerRef.current;
+    if (!container) return;
+
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const initialWidth = table.width || 100;
+    const initialHeight = table.height || 100;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const deltaX = ev.clientX - startX;
+      const deltaY = ev.clientY - startY;
+
+      const newWidth = Math.max(60, initialWidth + deltaX);
+      const newHeight = Math.max(60, initialHeight + deltaY);
+
+      updateTable(table.id, { width: newWidth, height: newHeight });
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   };
 
-  const handleSaveAllChanges = async () => { 
-      if (!hasUnsavedChanges) { setIsEditMode(false); setEditingTableId(null); return; }
-      setIsSaving(true);
-      try {
-          const updates = tables.map(t => ({ id: t.id, label: t.label, x: t.x, y: t.y, width: t.width, height: t.height, shape: t.shape, seats: t.seats }));
-          const { error } = await supabase.from('tables').upsert(updates);
-          if (error) throw error;
-          setHasUnsavedChanges(false); setIsEditMode(false); setEditingTableId(null);
-      } catch (e: any) { alert("Failed to save layout: " + e.message); } finally { setIsSaving(false); }
+  const handleTableClick = (e: React.MouseEvent, table: TableData) => {
+    e.stopPropagation();
+    if (!isEditMode) {
+      setSelectedTableId(table.id);
+    }
   };
 
-  const handleAddTable = async (template?: any) => { 
-      let nextNum = tables.length + 1; let label = `T-${nextNum}`; 
-      while (tables.some(t => t.label === label)) { nextNum++; label = `T-${nextNum}`; } 
-      const newId = `T-${Date.now()}`; const defaults = template || { label: 'New', shape: 'square', width: 100, height: 100, seats: 4 }; 
-      const newTable = { id: newId, label: defaults.label === 'New' ? label : defaults.label, shape: defaults.shape, x: 45, y: 45, width: defaults.width, height: defaults.height, seats: defaults.seats, status: 'Available', guests: 0, items: [] } as TableData; 
-      setTables(prev => [...prev, newTable]); 
-      if (isEditMode) { setEditingTableId(newId); setHasUnsavedChanges(true); }
-  };
-  
-  const handleDeleteTable = async (id: string, e?: React.MouseEvent) => { 
-      if (e) { e.preventDefault(); e.stopPropagation(); } 
-      if (!window.confirm("Delete this table?")) return;
-      const tableToDelete = tables.find(t => t.id === id); if (!tableToDelete) return; 
-      if (tableToDelete.status === 'Occupied') { alert("Cannot delete occupied table!"); return; } 
-      const { error } = await supabase.from('tables').delete().eq('id', id); if (error) { alert(`FAILED: ${error.message}`); return; } 
-      setTables(prev => prev.filter(t => t.id !== id)); if (editingTableId === id) setEditingTableId(null); setSelectedTableId(null); 
-  };
-  
-  const handleUpdateTableProps = (id: string, field: keyof TableData, value: any, e?: React.MouseEvent) => { 
-      if (e) { e.preventDefault(); e.stopPropagation(); }
-      setTables(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t)); setHasUnsavedChanges(true);
-  };
+  // --- Item Management Handlers ---
+  const filteredItemsForAdd = useMemo(() => {
+    return menuItems.filter(i => i.name.toLowerCase().includes(addItemsSearch.toLowerCase()));
+  }, [menuItems, addItemsSearch]);
 
-  const handleOpenNewOrder = () => { 
-      if (!selectedTableId) return; 
-      const table = tables.find(t => t.id === selectedTableId); 
-      if (table && table.items.length > 0) { 
-          setCurrentOrderItems([...table.items]); 
-      } else { 
-          setCurrentOrderItems([]); 
-      } 
-      setShowMenuModal(true); 
-  };
-
-  const handleAddToOrder = (item: MenuItem) => { setCurrentOrderItems(prev => { const existing = prev.find(i => i.id === item.id); if (existing) return prev.map(i => i.id === item.id ? { ...i, qty: i.qty + 1 } : i); return [...prev, { id: item.id, name: item.name, price: item.price, qty: 1, isNew: true }]; }); };
-  const handleUpdateOrderQty = (id: number, delta: number) => { setCurrentOrderItems(prev => prev.map(item => { if (item.id === id) { return { ...item, qty: Math.max(1, item.qty + delta) }; } return item; })); };
-  const handleRemoveFromOrder = (id: number) => { setCurrentOrderItems(prev => prev.filter(item => item.id !== id)); };
-  
-  const handleConfirmOrder = async () => { 
-      if (!selectedTableId) return; 
-      const table = tables.find(t => t.id === selectedTableId); 
-      const totalAmount = calculateTotal(currentOrderItems); 
-      const orderId = table?.orderId || `#${Date.now().toString().slice(-6)}`; 
-      
-      const { data: { user } } = await supabase.auth.getUser();
-
-      if (!table?.orderId) { 
-          if (currentOrderItems.length === 0) return; 
-          const { error } = await supabase.from('orders').insert([{ 
-              id: orderId, 
-              table_id: selectedTableId, 
-              status: 'Pending', 
-              total_amount: totalAmount, 
-              staff_name: user?.user_metadata?.full_name || 'Current Staff', 
-              user_id: user?.id, 
-              guests: guestCount 
-          }]); 
-          if (error) { alert("Failed"); return; } 
-      } else { 
-          await supabase.from('orders').update({ total_amount: totalAmount, guests: guestCount }).eq('id', orderId); 
-          await supabase.from('order_items').delete().eq('order_id', orderId); 
-      } 
-      if (currentOrderItems.length > 0) { 
-          const orderItemsDb = currentOrderItems.map(i => ({ order_id: orderId, menu_item_id: i.id, quantity: i.qty, price: i.price })); 
-          await supabase.from('order_items').insert(orderItemsDb); 
-      } 
-      await fetchTables(); 
-      setShowMenuModal(false); 
-      setSelectedTableId(null); 
-  };
-  
-  const handleOpenPayment = () => { 
-      if (!selectedTableId || !selectedTable?.orderId) return; 
-      setShowPaymentModal(true); 
-  };
-
-  const handlePaymentConfirm = async (method: 'Cash' | 'Card' | 'Transfer', shouldPrint: boolean) => {
-      if (!selectedTable || !selectedTable.orderId) return;
-      setIsProcessingPayment(true);
-      try {
-          await processOrderCompletion(selectedTable.orderId, method);
-          
-          if (shouldPrint) {
-              const fullOrder = {
-                  id: selectedTable.orderId,
-                  table: selectedTable.label,
-                  staff: selectedTable.waiter || 'Staff',
-                  items: selectedTable.items,
-                  total: calculateTotal(selectedTable.items),
-                  created_at: new Date().toISOString(),
-                  payment_method: method
-              };
-              printOrderReceipt(fullOrder);
-          }
-          
-          setShowPaymentModal(false);
-          setSelectedTableId(null);
-          await fetchTables();
-      } catch (error: any) {
-          alert("Payment failed: " + error.message);
-      } finally {
-          setIsProcessingPayment(false);
-      }
-  };
-
-  const handleOpenTransfer = () => {
-      if (!selectedTableId) return;
-      setShowTransferModal(true);
-  };
-
-  const handleTransferConfirm = async (targetTableId: string, mode: 'move' | 'merge') => {
-      if (!selectedTable || !selectedTable.orderId) return;
-      setIsProcessingTransfer(true);
-      try {
-          if (mode === 'move') {
-              // MOVE LOGIC: Update order's table_id to target
-              const { error } = await supabase
-                .from('orders')
-                .update({ table_id: targetTableId })
-                .eq('id', selectedTable.orderId);
-              if (error) throw error;
-          } else {
-              // MERGE LOGIC:
-              // 1. Get target table order
-              const targetTable = tables.find(t => t.id === targetTableId);
-              if (!targetTable || !targetTable.orderId) throw new Error("Target table has no order to merge into");
-              
-              // 2. Move items from current order to target order
-              const { error: moveItemsError } = await supabase
-                .from('order_items')
-                .update({ order_id: targetTable.orderId })
-                .eq('order_id', selectedTable.orderId);
-              if (moveItemsError) throw moveItemsError;
-
-              // 3. Update target order total
-              const newTotal = (targetTable.orderTotal || 0) + (selectedTable.orderTotal || 0);
-              await supabase.from('orders').update({ total_amount: newTotal }).eq('id', targetTable.orderId);
-
-              // 4. Delete current order (empty shell)
-              await supabase.from('orders').delete().eq('id', selectedTable.orderId);
-          }
-          
-          await fetchTables();
-          setShowTransferModal(false);
-          setSelectedTableId(null);
-      } catch (error: any) {
-          alert(`Transfer failed: ${error.message}`);
-      } finally {
-          setIsProcessingTransfer(false);
-      }
-  };
-
-  const filteredMenu = menuItems.filter(item => (menuCategory === 'All' || item.category === menuCategory) && item.name.toLowerCase().includes(menuSearch.toLowerCase()));
-
-  const getTableClasses = (t: TableData, isSelected: boolean) => {
-    let classes = `absolute flex flex-col items-center justify-center transition-all select-none rounded-2xl `;
-    classes += isEditMode ? 'cursor-move ' : 'cursor-pointer ';
-    if (t.status === 'Available') {
-        classes += "bg-[#f8fafc] border-2 border-dashed border-[#cbd5e1] text-[#64748b] shadow-sm hover:border-[#10B981] hover:text-[#10B981] hover:shadow-md hover:bg-white ";
-        classes += "dark:bg-[#1a2c26]/40 dark:border-[#19e6a2]/30 dark:text-[#93c8b6] dark:hover:border-[#19e6a2] dark:hover:bg-[#19e6a2]/10 ";
+  const handleSelectItemToAdd = (item: MenuItem) => {
+    const existingIdx = currentOrderItems.findIndex(i => String(i.menu_item_id) === String(item.id) && (i as any).isNew);
+    if (existingIdx > -1) {
+      const next = [...currentOrderItems];
+      next[existingIdx].quantity += 1;
+      setCurrentOrderItems(next);
     } else {
-        classes += "bg-white border-2 border-[#10B981] text-[#065f46] shadow-[0_8px_24px_rgba(16,185,129,0.25)] ";
-        classes += "dark:bg-[#052e16] dark:border-[#19e6a2] dark:text-white dark:shadow-[0_0_20px_rgba(25,230,162,0.15)] ";
+      setCurrentOrderItems([...currentOrderItems, {
+        id: crypto.randomUUID(), // Temp ID
+        order_id: '', // Temp
+        menu_item_id: item.id,
+        quantity: 1,
+        price: item.price,
+        snapshot_name: item.name,
+        note: '',
+        _display_name: item.name,
+        _display_price: item.price,
+        ...({ isNew: true } as any)
+      }]);
     }
-    if (isEditMode && editingTableId === t.id) {
-        classes = `absolute flex flex-col items-center justify-center rounded-2xl bg-white/90 dark:bg-[#1a2c26]/80 border-2 border-primary shadow-[0_0_15px_rgba(16,185,129,0.3)] dark:shadow-[0_0_15px_rgba(25,230,162,0.3)] z-20 cursor-move text-primary select-none`;
-    }
-    if (isSelected) {
-        classes += "ring-2 ring-offset-2 ring-[#10B981] ring-offset-[#F8FAFC] dark:ring-offset-[#0d1815] z-30 scale-105 ";
-    }
-    if (activeInteractionId === t.id) {
-        classes += ' z-50 shadow-2xl scale-[1.02] ';
-    }
-    return classes;
   };
 
-  if (loading) return <div className="flex items-center justify-center h-full"><Loader2 className="animate-spin text-primary" size={48} /></div>;
+  const handleConfirmAddItems = async () => {
+    console.log(`[CONFIRM_FLOW] start tableId=${selectedTableId}`);
 
-  return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden relative transition-colors bg-background">
-      <header className="h-16 flex items-center justify-between px-4 lg:px-6 border-b border-border bg-background shrink-0 z-30">
-        <div className="flex items-center gap-4">
-          <h2 className="text-text-main text-lg lg:text-xl font-bold">{t('Main Hall')}</h2>
-          {isEditMode ? 
-             <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20"><Layout size={16} /><span className="text-xs font-bold uppercase hidden sm:inline">{t('Editor Mode')}</span></div>
-                {hasUnsavedChanges && <div className="text-primary text-xs font-bold animate-pulse flex items-center gap-1"><AlertTriangle size={12}/> Unsaved</div>}
-             </div>
-             : 
-             <div className="flex items-center gap-2 text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20"><span className="block size-2 rounded-full bg-primary animate-pulse"></span><span className="text-xs font-bold uppercase hidden sm:inline">{t('Live')}</span></div>
-          }
-        </div>
-        <div className="flex items-center gap-4">
-          {role === 'admin' && (
-             <button 
-                onClick={() => isEditMode ? handleSaveAllChanges() : setIsEditMode(true)} 
-                disabled={isSaving}
-                className={`flex items-center gap-2 px-3 lg:px-4 h-9 lg:h-10 rounded-lg text-xs lg:text-sm font-bold transition-all
-                    ${isEditMode 
-                        ? (hasUnsavedChanges ? 'bg-primary hover:bg-primary-hover text-background shadow-lg shadow-primary/20' : 'bg-surface hover:bg-border text-text-main border border-border') 
-                        : 'bg-surface hover:bg-border text-text-main border border-border'
-                    }
-                `}
-             >
-                {isEditMode ? 
-                    (isSaving ? <><Loader2 size={18} className="animate-spin"/> {t('Save Changes')}...</> : <><Save size={18}/> {hasUnsavedChanges ? t('Save Changes') : t('Done')}</>) 
-                    : <><Layout size={18} /> {t('Edit Layout')}</>
-                }
-             </button>
+    const newItemsPayload = currentOrderItems.filter((i: any) => i.isNew).map(i => ({
+      menu_item_id: i.menu_item_id,
+      quantity: i.quantity,
+      price: i.price,
+      _snapshot_name: i.snapshot_name,
+      note: (i.note || '').trim()
+    }));
+
+    if (newItemsPayload.length === 0) {
+      console.warn(`[CONFIRM_FLOW] No new items to add. Closing.`);
+      setIsAddItemsModalOpen(false);
+      return;
+    }
+
+    // Check if there is an active order for this table
+    const activeOrder = (orders || []).find(o => String(o.table_id) === String(selectedTableId) && ['Pending', 'Cooking', 'Ready'].includes(o.status));
+
+    try {
+      if (activeOrder) {
+        console.log(`[CONFIRM_FLOW] Adding items to Existing Order ${activeOrder.id}`);
+        await addItemToSession(String(activeOrder.id), newItemsPayload);
+        showToast(t('Đã thêm món vào đơn'), 'success');
+      } else {
+        // Create NEW ORDER
+        console.log(`[CONFIRM_FLOW] Creating NEW Order for Table ${selectedTableId}`);
+        if (!selectedTableId) {
+          console.error(`[CONFIRM_FLOW] Error: No table selected`);
+          return;
+        }
+
+        const fullOrderData = {
+          table_id: selectedTableId,
+          guests: 1, // Default
+          order_items: newItemsPayload
+        };
+
+        const newId = await addLocalOrder(fullOrderData);
+        console.log(`[CONFIRM_FLOW] New Order Created: ${newId}`);
+        showToast(t('Table Opened Successfully'), 'success');
+      }
+
+      setIsAddItemsModalOpen(false);
+      setCurrentOrderItems([]); // Reset local state
+    } catch (e: any) {
+      console.error(`[CONFIRM_FLOW] Error:`, e);
+      showToast(t('Failed to Save Order'), 'error');
+    }
+  };
+
+  const handleUpdateItemQty = (idx: number, delta: number, currentList: OrderItem[]) => {
+    const next = [...currentList];
+    const newQty = (next[idx].quantity || 0) + delta;
+    if (newQty <= 0) {
+      next.splice(idx, 1);
+    } else {
+      next[idx] = { ...next[idx], quantity: newQty };
+    }
+    setModifiedItems(next);
+  };
+
+  const openNoteModal = (idx: number, source: 'active' | 'add_items') => {
+    let note = "";
+    if (source === 'active') {
+      const activeOrder = (orders || []).find(o => String(o.table_id) === String(selectedTableId) && ['Pending', 'Cooking', 'Ready'].includes(o.status));
+      const list = modifiedItems || (activeOrder ? enrichOrderDetails(activeOrder, menuItems).items : []);
+      note = list[idx]?.note || "";
+    } else {
+      note = currentOrderItems[idx]?.note || "";
+    }
+    setEditingNoteItem({ idx, currentNote: note, source });
+    setNoteInput(note);
+    setIsNoteModalOpen(true);
+  };
+
+  const saveNote = () => {
+    if (editingNoteItem) {
+      if (editingNoteItem.source === 'active') {
+        const activeOrder = (orders || []).find(o => String(o.table_id) === String(selectedTableId) && ['Pending', 'Cooking', 'Ready'].includes(o.status));
+        const list = modifiedItems || (activeOrder ? enrichOrderDetails(activeOrder, menuItems).items : []);
+        const next = [...list];
+        if (next[editingNoteItem.idx]) {
+          next[editingNoteItem.idx] = { ...next[editingNoteItem.idx], note: noteInput };
+          setModifiedItems(next);
+        }
+      } else {
+        const next = [...currentOrderItems];
+        if (next[editingNoteItem.idx]) {
+          next[editingNoteItem.idx] = { ...next[editingNoteItem.idx], note: noteInput };
+          setCurrentOrderItems(next);
+        }
+      }
+    }
+    setIsNoteModalOpen(false);
+  };
+
+  const handleUpdateOrder = async (order: any) => {
+    if (!modifiedItems) return;
+    const payload = modifiedItems.map(it => ({
+      menu_item_id: it.menu_item_id,
+      quantity: Number(it.quantity || 1),
+      price: Number(it.price || 0),
+      _snapshot_name: it.snapshot_name,
+      note: (it.note || '').trim()
+    }));
+    await updateLocalOrder(String(order.id), { order_items: payload });
+    setModifiedItems(null);
+  };
+
+  const handleTransferConfirm = async (targetId: string, mode: 'move' | 'merge') => {
+    setIsSubmitting(true);
+    console.log(`[move_table] start: mode=${mode}, source=${selectedTableId}, target=${targetId}`);
+    try {
+      if (mode === 'move') {
+        await moveTable(selectedTableId!, targetId);
+      } else {
+        await mergeOrders(selectedTableId!, targetId);
+      }
+      console.log(`[move_table] ok`);
+      setShowTransferModal(false);
+      setSelectedTableId(null);
+    } catch (e) {
+      console.error('[move_table] error:', e);
+      alert('Failed to transfer table');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteClick = (order: any) => {
+    performCancelOrder(order, () => {
+      setSelectedTableId(null);
+      setModifiedItems(null);
+    });
+  };
+
+  const performPrint = async (order: any) => {
+    if (isSandboxed() && settings.printMethod !== 'rawbt') {
+      const html = await generateReceiptHTML(order, settings);
+      openPreview({ html, title: 'In hóa đơn', meta: { action: 'REPRINT_ON_EDIT' } });
+    } else {
+      await printOrderReceipt(order, settings);
+    }
+  };
+
+  if (loading) return <div className="flex-1 flex items-center justify-center bg-background"><Loader2 className="animate-spin text-primary" size={48} /></div>;
+
+  if (!settings.enableTableMap) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center h-full bg-background p-8 text-center animate-in fade-in">
+        <div className="p-6 bg-surface border border-border rounded-3xl shadow-sm max-w-md">
+          <Ban size={48} className="text-secondary mx-auto mb-4 opacity-50" />
+          <h2 className="text-xl font-bold text-text-main mb-2">{t('Table Management Disabled')}</h2>
+          <p className="text-secondary text-sm mb-6">
+            Chế độ quản lý bàn đang tắt trong Cài đặt. Vui lòng chuyển sang tab Menu hoặc Dashboard để bán hàng.
+          </p>
+          {settings.quickOrder && (
+            <div className="p-3 bg-primary/10 rounded-xl text-primary text-xs font-bold uppercase tracking-wider">
+              Quick Order Mode is Active
+            </div>
           )}
         </div>
-      </header>
+      </div>
+    );
+  }
 
-      <div className="flex-1 flex overflow-hidden relative">
-        <div 
-            ref={containerRef} 
-            onClick={handleBackgroundClick} 
-            className="flex-1 overflow-auto custom-scrollbar select-none relative" 
-            style={{ 
-                backgroundImage: 'linear-gradient(var(--color-grid) 1px, transparent 1px), linear-gradient(90deg, var(--color-grid) 1px, transparent 1px)', 
-                backgroundSize: '40px 40px', 
-                backgroundColor: 'var(--color-floor-bg)', 
-                minHeight: '1000px', 
-                minWidth: '1000px' 
-            }}
+  const activeTable = (tables || []).find(t => t.id === selectedTableId) as TableData | undefined;
+  const canEditLayout = can('table.edit_layout');
+
+  return (
+    <div className="flex-1 flex flex-col h-full bg-background transition-colors overflow-hidden">
+      <header className="h-16 flex items-center justify-between px-6 border-b border-border bg-background shrink-0 z-40">
+        <div className="flex items-center gap-4"><h2 className="text-text-main text-xl font-bold">{t('Main Hall')}</h2>{isEditMode ? (<div className="flex items-center gap-2 text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20"><span className="text-xs font-bold uppercase">{t('Editor Mode')}</span></div>) : (<div className="flex items-center gap-2 text-primary bg-primary/10 px-3 py-1 rounded-full border border-primary/20"><span className="size-2 rounded-full bg-primary animate-pulse"></span><span className="text-xs font-bold uppercase">{t('Live')}</span></div>)}</div>
+        {canEditLayout && (
+          <div className="flex gap-2">
+            {isEditMode && (
+              <button onClick={handleAddTable} className="h-10 px-4 rounded-xl text-sm font-bold bg-surface border border-border text-text-main hover:border-primary flex items-center gap-2 transition-all shadow-sm">
+                <Plus size={16} /> {t('Add Table')}
+              </button>
+            )}
+            <button onClick={isEditMode ? handleSaveLayout : () => setIsEditMode(true)} disabled={isSaving} className={`h-10 px-4 rounded-xl text-sm font-bold transition-all flex items-center gap-2 ${isEditMode ? 'bg-primary text-background shadow-lg shadow-primary/20' : 'bg-surface border border-border text-text-main hover:border-primary'}`}>{isEditMode ? (isSaving ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />) : <Layout size={16} />}{isEditMode ? (hasUnsavedChanges ? t('Save Changes') : t('Done')) : t('Edit Layout')}</button>
+          </div>
+        )}
+      </header>
+      <div className="flex-1 relative overflow-hidden">
+        <div
+          ref={containerRef}
+          onClick={() => {
+            setEditingTableId(null);
+            setSelectedTableId(null);
+          }}
+          className="absolute inset-0 overflow-auto select-none"
+          style={{
+            backgroundImage: 'linear-gradient(var(--color-grid) 1px, transparent 1px), linear-gradient(90deg, var(--color-grid) 1px, transparent 1px)',
+            backgroundSize: '40px 40px',
+            backgroundColor: 'var(--color-floor-bg)',
+            minHeight: '1000px',
+            minWidth: '1000px'
+          }}
         >
-            {tables.map(t => {
-                const isSelected = selectedTableId === t.id && !isEditMode;
-                return (
-                  <div 
-                      key={t.id} 
-                      onMouseDown={(e) => handleMouseDownDrag(e, t)}
-                      onClick={(e) => handleTableClick(e, t)}
-                      onDoubleClick={(e) => handleTableDoubleClick(e, t)}
-                      style={{ left: `${t.x}%`, top: `${t.y}%`, width: `${t.width}px`, height: `${t.height}px` }} 
-                      className={getTableClasses(t, isSelected)}
+          {(localTables || []).map(table => {
+            const activeOrder = (orders || []).find(o => String(o.table_id) === String(table.id) && ['Pending', 'Cooking', 'Ready'].includes(o.status));
+            const isOccupied = !!activeOrder;
+            const isSelected = selectedTableId === table.id && !isEditMode;
+            const isEditing = isEditMode && editingTableId === table.id;
+            let isOverTime = false;
+            if (isOccupied && settings.tableTimeAlert && activeOrder.created_at) {
+              const duration = (Date.now() - new Date(activeOrder.created_at).getTime()) / 60000;
+              if (duration > settings.tableTimeLimit) isOverTime = true;
+            }
+            let tableClasses = `absolute flex flex-col items-center justify-center transition-all duration-300 select-none border-2 rounded-2xl `;
+            if (!isOccupied) {
+              tableClasses += "bg-[#f8fafc] border-3 border-dashed border-[#cbd5e1] text-[#64748b] shadow-sm hover:border-[#10B981] hover:shadow-md hover:bg-white ";
+              tableClasses += "dark:bg-[#1a2c26]/40 dark:border-[#19e6a2]/30 dark:text-[#93c8b6] dark:shadow-sm dark:hover:border-[#19e6a2] dark:hover:bg-[#19e6a2]/2 dark:hover:text-white dark:hover:bg-surface dark:hover:shadow-[0_0_15px_rgba(25,230,162,0.4)] ";
+            } else {
+              if (isOverTime) {
+                tableClasses += "bg-red-500/10 border-red-500 text-red-500 animate-pulse shadow-lg shadow-red-500/20 ";
+              } else {
+                tableClasses += "bg-gray-100 border-2 border-primary border-gray-350 text-gray-800 shadow-sm hover:border-[#10B981] hover:shadow-md hover:bg-gray-100 ";
+                tableClasses += "dark:bg-[#052e16] dark:border-[#19e6a2] dark:text-white dark:shadow-[0_0_20px_rgba(25,230,162,0.25)] ";
+              }
+              if (!isEditMode) tableClasses += "hover:scale-[1.02] hover:shadow-[0_0_25px_rgba(25,230,162,0.4)] ";
+            }
+            if (isEditMode) {
+              tableClasses += "cursor-move border-dashed ";
+              if (isEditing) {
+                tableClasses = `absolute flex flex-col items-center justify-center rounded-2xl bg-surface border-2 border-primary shadow-[0_0_15px_rgba(var(--color-primary-rgb),0.3)] z-[100] cursor-move text-primary select-none`;
+              }
+            } else {
+              tableClasses += "cursor-pointer active:scale-95 ";
+              if (isSelected) {
+                tableClasses += "ring-2 ring-offset-2 ring-emerald-400 dark:ring-emerald-500 ring-offset-background z-30 scale-105 ";
+              } else {
+                tableClasses += "z-10 ";
+              }
+            }
+            return (
+              <div
+                key={table.id}
+                id={`table-node-${table.id}`}
+                onMouseDown={(e) => {
+                  startInteractionSelectedRef.current = (selectedTableId === table.id);
+                  handleMouseDownDrag(e, table);
+                }}
+                onClick={(e) => handleTableClick(e, table)}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  if (table && startInteractionSelectedRef.current) {
+                    if (canEditLayout) {
+                      setIsEditMode(true);
+                      setEditingTableId(table.id);
+                    }
+                  }
+                }}
+                style={{
+                  left: `${table.x}%`,
+                  top: `${table.y}%`,
+                  width: `${table.width}px`,
+                  height: `${table.height}px`,
+                  borderRadius: table.shape === 'round' ? '9999px' : '16px'
+                }}
+                className={tableClasses}
+              >
+                <span className="text-lg font-black tracking-tight">{table.label}</span>
+                {isEditing && (
+                  <div onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} className="absolute z-[110] top-full mt-2 left-1/2 -translate-x-1/2 w-[220px] bg-surface border border-border rounded-xl shadow-2xl p-3 animate-in fade-in zoom-in-95 duration-200">
+                    <div className="flex items-center gap-2 mb-3"><div className="relative flex-1 group"><Type size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-secondary" /><input type="text" value={table.label} onChange={(e) => updateTable(table.id, { label: e.target.value })} className="w-full bg-background border border-border rounded-lg py-1.5 pl-7 pr-2 text-text-main text-xs font-bold outline-none" placeholder="Label" /></div><button onClick={(e) => deleteTable(table.id, e)} className="p-1.5 text-secondary hover:text-red-500 rounded-lg transition-colors"><Trash2 size={16} /></button></div>
+                    <div className="mb-3"><span className="text-[10px] font-black text-secondary uppercase tracking-widest mb-1 block">SHAPE</span><div className="grid grid-cols-3 gap-1 bg-background p-1 rounded-lg border border-border"><button onClick={() => updateTable(table.id, { shape: 'square' })} className={`flex items-center justify-center p-1.5 rounded-md transition-all ${table.shape === 'square' ? 'bg-primary text-background' : 'text-secondary hover:text-text-main'}`}><Square size={14} /></button><button onClick={() => updateTable(table.id, { shape: 'round' })} className={`flex items-center justify-center p-1.5 rounded-md transition-all ${table.shape === 'round' ? 'bg-primary text-background' : 'text-secondary hover:text-text-main'}`}><Circle size={14} /></button><button onClick={() => updateTable(table.id, { shape: 'rect' })} className={`flex items-center justify-center p-1.5 rounded-md transition-all ${table.shape === 'rect' ? 'bg-primary text-background' : 'text-secondary hover:text-text-main'}`}><RectangleHorizontal size={14} /></button></div></div>
+                    <div><span className="text-[10px] font-black text-secondary uppercase tracking-widest mb-1 block">SEATS</span><div className="flex items-center justify-between bg-background p-1.5 rounded-lg border border-border"><Users size={14} className="text-secondary ml-1" /><div className="flex items-center gap-3"><button onClick={() => updateTable(table.id, { seats: Math.max(1, (table.seats || 2) - 1) })} className="w-6 h-6 flex items-center justify-center bg-surface border border-border rounded hover:bg-border text-text-main"><Minus size={12} /></button><span className="text-xs font-bold text-text-main min-w-[12px] text-center">{table.seats || 2}</span><button onClick={() => updateTable(table.id, { seats: (table.seats || 2) + 1 })} className="w-6 h-6 flex items-center justify-center bg-surface border border-border rounded hover:bg-border text-text-main"><Plus size={12} /></button></div></div></div>
+                  </div>
+                )}
+                {isOccupied && !isEditMode && (<div className="mt-1 text-[9px] font-bold bg-white/25 text-primary dark:text-white px-2 py-0.5 rounded-full uppercase tracking-wider">{t('Occupied')}</div>)}
+                {isEditMode && editingTableId === table.id && (<div onMouseDown={(e) => handleResizeStart(e, table)} className="absolute bottom-1 right-1 cursor-nwse-resize p-1 text-primary"><Maximize2 size={16} /></div>)}
+              </div>
+            );
+          })}
+        </div>
+        {!isEditMode && selectedTableId && activeTable && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="fixed lg:absolute bottom-0 lg:bottom-auto left-0 lg:left-auto w-full lg:w-[320px] z-[60] animate-in slide-in-from-bottom duration-300 flex flex-col max-h-[85vh] lg:max-h-[60vh] shadow-xl rounded-2xl"
+            style={window.innerWidth >= 1024 ? {
+              top: (activeTable.y || 0) > 60 ? 'auto' : `${activeTable.y}%`,
+              bottom: (activeTable.y || 0) > 60 ? `${100 - (activeTable.y || 0)}%` : 'auto',
+              left: (activeTable.x || 0) < 50 ? `calc(${activeTable.x}% + ${activeTable.width}px + 12px)` : `calc(${activeTable.x}% - 332px)`
+            } : {}}
+          >
+            {(() => {
+              const active = (orders || []).find(o => String(o.table_id) === String(selectedTableId) && ['Pending', 'Cooking', 'Ready'].includes(o.status));
+              if (!active) return (
+                <div
+                  className="bg-surface border border-border shadow-2xl rounded-2xl overflow-hidden p-4 transition-all duration-300 mb-[calc(env(safe-area-inset-bottom)+10px)] lg:mb-0 shrink-0"
+                  style={{ borderWidth: 'var(--pos-border-strong)' }}
+                >
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <div className="flex items-center gap-3 overflow-hidden">
+                      <div className="size-10 shrink-0 bg-primary/10 rounded-xl flex items-center justify-center text-primary">
+                        <Armchair size={20} />
+                      </div>
+                      <div className="overflow-hidden">
+                        <h3 className="text-base font-black text-text-main truncate leading-none mb-1.5">{activeTable.label}</h3>
+                        <div className="flex items-center gap-1.5">
+                          <div className="size-1.5 rounded-full bg-green-500"></div>
+                          <p className="text-[10px] text-secondary font-bold uppercase tracking-wider">{t('Available')}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <button onClick={() => setSelectedTableId(null)} className="p-2 hover:bg-border/50 rounded-lg text-secondary transition-all">
+                      <X size={20} />
+                    </button>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setCurrentOrderItems([]);
+                      setIsAddItemsModalOpen(true);
+                    }}
+                    className="w-full h-12 bg-primary text-background rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all text-sm"
+                    style={{ minHeight: 'var(--pos-btn-h)' }}
                   >
-                    {(isEditMode && editingTableId === t.id) && <div className="absolute inset-0 flex items-center justify-center bg-black/10 rounded-inherit pointer-events-none"><Move className="text-primary opacity-50" size={32} /></div>}
-                    {!isEditMode && editingTableId !== t.id && t.status === 'Occupied' && <div className="absolute -top-3 flex items-center gap-1 bg-surface px-2 py-0.5 rounded-full border border-border shadow-sm"><span className={`size-2 rounded-full ${t.orderStatus === 'Ready' ? 'bg-green-500 animate-pulse' : t.orderStatus === 'Cooking' ? 'bg-primary' : 'bg-yellow-500'}`} /><span className="text-[10px] font-bold text-text-main uppercase">{t.orderStatus}</span></div>}
-                    
-                    <span className={`text-xl font-bold`}>{t.label}</span>
-                    
-                    {!isEditMode && t.status === 'Occupied' && <div className="mt-1 text-xs font-bold bg-black/10 px-2 py-0.5 rounded text-current">{formatPrice(calculateTotal(t.items))}</div>}
-                    {isEditMode && editingTableId === t.id && ( 
-                        <div 
-                            className="absolute bottom-0 right-0 z-20 p-1 cursor-nwse-resize text-primary hover:bg-primary/20 rounded-tl" 
-                            onMouseDown={(e) => handleResizeStart(e, t)}
+                    <Plus size={18} /> {t('Open Table')}
+                  </button>
+                </div>
+              );
+              // ... (Existing Active Table Render Logic) ...
+              const { items: enriched } = enrichOrderDetails(active, menuItems);
+              const itemsToDisplay = modifiedItems || enriched;
+              const currentTotal = itemsToDisplay.reduce((acc: number, it: OrderItem) => acc + (Number(it.price || 0) * Number(it.quantity || 1)), 0);
+              const hasChanges = modifiedItems !== null && JSON.stringify(modifiedItems) !== JSON.stringify(enriched);
+              const discountAmount = active.discount_amount || 0;
+              const finalDisplayTotal = Math.max(0, currentTotal - discountAmount);
+              return (
+                <div
+                  className="bg-surface/90 dark:bg-surface/80 dark:bg-[#1a2c26]/95 backdrop-blur-md border border-border shadow-2xl rounded-t-[20px] lg:rounded-[20px] overflow-hidden flex flex-col w-full h-full max-h-full transition-all duration-300"
+                  style={{ borderWidth: 'var(--pos-border-strong)' }}
+                >
+                  {/* HEADER SECTION - FIXED */}
+                  <div className="p-5 pb-0 shrink-0">
+                    <div className="flex justify-between items-start pb-4 border-b border-border/50">
+                      <div className="flex items-center gap-3">
+                        <div className="size-10 bg-emerald-500/10 rounded-xl flex items-center justify-center text-emerald-500 shadow-sm"><Armchair size={20} /></div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            {active.table_id === 'Takeaway' ? (
+                              <span className="px-2 py-0.5 rounded-lg text-sm font-black bg-amber-100 text-amber-600 border border-amber-200 uppercase tracking-tighter">
+                                {activeTable?.label || 'Takeaway'}
+                              </span>
+                            ) : (
+                              <h3 className="text-lg font-black leading-tight text-text-main">
+                                {activeTable?.label}
+                              </h3>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <div className="size-2 rounded-full bg-emerald-500 animate-pulse"></div>
+                            <p className="text-[9px] text-secondary uppercase font-bold tracking-[0.1em]">{t('In Use')}</p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex gap-1">
+                        <button onClick={() => setShowTransferModal(true)} className="p-2 text-secondary hover:text-primary hover:bg-primary/10 rounded-xl transition-all" title={t('Split / Merge Table')}><ArrowRightLeft size={18} /></button>
+
+                        <button
+                          onClick={() => handleDeleteClick(active)}
+                          className="p-2 text-secondary hover:text-red-500 hover:bg-red-500/10 rounded-xl transition-all"
                         >
-                            <Maximize2 size={20} strokeWidth={2.5} />
-                        </div> 
+                          <Trash2 size={18} />
+                        </button>
+
+                        <button onClick={() => setSelectedTableId(null)} className="p-2 hover:bg-border/50 rounded-xl text-secondary transition-all"><X size={18} /></button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ITEMS LIST - SCROLLABLE FLEX */}
+                  <div
+                    className="flex-1 overflow-y-auto p-5 py-2 custom-scrollbar min-h-0"
+                  >
+                    {itemsToDisplay.length === 0 ? (
+                      <div className="text-center py-4 text-secondary text-xs opacity-50 font-bold uppercase">{t('Cart is empty')}</div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {itemsToDisplay.map((it: any, idx: number) => (
+                          <div key={idx} className="flex flex-col p-3 bg-background/40 hover:bg-background/80 border border-border/40 rounded-xl group transition-all duration-200 relative">
+                            <div className="flex items-center justify-between gap-3">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <div className="flex items-center gap-1.5 bg-surface border border-border p-0.5 rounded-lg">
+                                  <button
+                                    onClick={() => handleUpdateItemQty(idx, -1, itemsToDisplay)}
+                                    className="size-6 flex items-center justify-center hover:bg-border rounded text-secondary hover:text-red-500"
+                                  >
+                                    <Minus size={10} />
+                                  </button>
+                                  <span className="font-black text-emerald-600 dark:text-emerald-400 text-[11px] min-w-[14px] text-center">{it.quantity}</span>
+                                  <button
+                                    onClick={() => handleUpdateItemQty(idx, 1, itemsToDisplay)}
+                                    className="size-6 flex items-center justify-center hover:bg-border rounded text-secondary hover:text-primary"
+                                  >
+                                    <Plus size={10} />
+                                  </button>
+                                </div>
+                                <p className="min-w-0 text-[13px] font-bold text-text-main truncate leading-tight tracking-tight">
+                                  {it._display_name}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className="shrink-0 text-xs font-black text-text-main">
+                                  {formatPrice(it._display_price * it.quantity)}
+                                </span>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); openNoteModal(idx, 'active'); }}
+                                  className={`shrink-0 p-1.5 rounded-lg border transition-all
+                                            ${it.note
+                                      ? 'bg-amber-500/10 border-amber-500/30 text-amber-600 hover:bg-amber-500/15'
+                                      : 'bg-background/50 border-border text-secondary hover:text-primary hover:bg-background/70'
+                                    }`}
+                                  title={it.note ? t('Sửa ghi chú') : t('Thêm ghi chú')}
+                                >
+                                  <StickyNote size={11} />
+                                </button>
+                              </div>
+                            </div>
+                            {it.note && (
+                              <div className="flex items-start gap-1.5 mt-2 ml-10 p-1.5 bg-amber-500/5 rounded-lg border border-amber-500/10">
+                                <p className="text-[10px] font-medium text-amber-600 dark:text-amber-500 italic leading-snug line-clamp-2">{it.note}</p>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     )}
                   </div>
-                );
-            })}
 
-            {/* --- ACTION PANEL (Smart Position & Responsive) --- */}
-            {!isEditMode && selectedTable && (
-               <div 
-                 onClick={(e) => e.stopPropagation()}
-                 className={`
-                    z-50 animate-in duration-200
-                    fixed bottom-0 left-0 right-0 w-full rounded-t-2xl border-t border-primary/20 shadow-[0_-10px_40px_rgba(0,0,0,0.2)] pb-safe slide-in-from-bottom
-                    lg:absolute lg:bottom-auto lg:left-auto lg:right-auto lg:w-auto lg:rounded-2xl lg:border lg:shadow-2xl lg:pb-0 lg:zoom-in-95
-                 `}
-                 style={
-                    window.innerWidth >= 1024 ? {
-                        top: `${selectedTable.y}%`,
-                        // 30/70 Rule for Positioning
-                        // If x < 30%, show on RIGHT side
-                        left: selectedTable.x < 30
-                            ? `calc(${selectedTable.x}% + ${selectedTable.width}px + 12px)`
-                            : 'auto',
-                        // If x >= 30%, show on LEFT side (calculated from right edge)
-                        right: selectedTable.x >= 30
-                            ? `calc((100% - ${selectedTable.x}%) + 12px)`
-                            : 'auto'
-                    } : {}
-                 }
-               >
-                 <div className="bg-surface/95 dark:bg-[#1a2c26]/95 backdrop-blur-xl p-4 lg:min-w-[300px] flex flex-col gap-4 lg:rounded-2xl">
-                    {/* Mobile Handle */}
-                    <div className="lg:hidden w-12 h-1.5 bg-border rounded-full mx-auto -mt-2 mb-2" />
-                    
-                    {/* Header */}
-                    <div className="flex justify-between items-center pb-3 border-b border-border/50">
-                        <div>
-                           <h3 className="text-xl font-bold text-text-main">{selectedTable.label}</h3>
-                           <p className="text-xs text-secondary font-medium">{t(selectedTable.status)} • {selectedTable.timeElapsed || '0m'}</p>
+                  {/* FOOTER SECTION - FIXED */}
+                  <div className="p-5 pt-0 pb-[calc(1.25rem+env(safe-area-inset-bottom))] shrink-0 bg-surface/5 lg:bg-transparent">
+                    <div className="flex justify-between items-end border-t border-border/60 pt-4 mb-4">
+                      <div className="flex flex-col">
+                        <span className="text-[10px] font-black text-secondary uppercase tracking-widest">{t('Total Balance')}</span>
+                        <div className="flex items-center gap-1.5 text-secondary mt-1">
+                          <span className="text-[10px] font-bold">{new Date(active.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
-                        <span className={`size-3 rounded-full ${selectedTable.status === 'Occupied' ? 'bg-primary shadow-[0_0_10px_rgba(16,185,129,0.5)]' : 'bg-secondary/50'}`}></span>
+                      </div>
+                      <div className="text-right">
+                        {discountAmount > 0 && <span className="block text-xs font-bold text-red-500 mb-1">-{formatPrice(discountAmount)}</span>}
+                        <span className="text-2xl font-black text-emerald-600 dark:text-emerald-400 drop-shadow-sm">{formatPrice(finalDisplayTotal)}</span>
+                      </div>
                     </div>
-
-                    {/* Guest Control */}
-                    <div className="flex items-center justify-between bg-background/50 p-2 rounded-xl border border-border/50">
-                        <span className="text-xs font-bold text-secondary uppercase ml-1">{t('Guests')}</span>
-                        <div className="flex items-center gap-3">
-                           <button onClick={() => handleUpdateGuestCount(-1)} className="size-8 rounded-lg bg-surface border border-border flex items-center justify-center hover:border-primary hover:text-primary transition-colors"><Minus size={16}/></button>
-                           <span className="font-bold text-lg w-4 text-center text-text-main">{guestCount}</span>
-                           <button onClick={() => handleUpdateGuestCount(1)} className="size-8 rounded-lg bg-surface border border-border flex items-center justify-center hover:border-primary hover:text-primary transition-colors"><Plus size={16}/></button>
-                        </div>
-                    </div>
-                    
-                    {/* Active Order Preview */}
-                    {selectedTable.items.length > 0 && (
-                        <div className="max-h-[120px] overflow-y-auto custom-scrollbar bg-background/30 rounded-lg p-2 space-y-1">
-                           {selectedTable.items.map((item, idx) => (
-                               <div key={idx} className="flex justify-between text-xs">
-                                   <span className="text-text-main"><span className="font-bold">{item.qty}x</span> {typeof item.name === 'string' ? item.name : 'Item'}</span>
-                                   <span className="font-bold text-text-main">{formatPrice(item.price * item.qty)}</span>
-                               </div>
-                           ))}
-                           <div className="border-t border-border/30 pt-1 mt-1 flex justify-between font-bold text-sm text-primary">
-                               <span>{t('Total')}</span>
-                               <span>{formatPrice(calculateTotal(selectedTable.items))}</span>
-                           </div>
-                        </div>
-                    )}
-
-                    {/* Main Actions */}
-                    <div className="grid grid-cols-2 gap-3">
-                        <button 
-                            onClick={handleOpenNewOrder} 
-                            className={`h-12 bg-surface hover:bg-background border border-border hover:border-primary text-text-main rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-sm ${selectedTable.status === 'Occupied' ? 'col-span-1' : 'col-span-2'}`}
+                    <div className="flex flex-col gap-2.5">
+                      {hasChanges ? (
+                        <button
+                          onClick={() => handleUpdateOrder(active)}
+                          className="w-full h-11 bg-emerald-500 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 hover:brightness-105 transition-all animate-in zoom-in-95 duration-200 uppercase tracking-wider"
+                          style={{ minHeight: 'var(--pos-btn-h)' }}
                         >
-                            <Plus size={18} className="text-primary" /> {t('Add Items')}
+                          <RefreshCw size={16} /> {t('Update Order')}
                         </button>
-                        
-                        {/* Only show Pay and Split/Merge if the table is Occupied */}
-                        {selectedTable.status === 'Occupied' && (
-                            <>
-                                <button 
-                                    onClick={handleOpenPayment} 
-                                    disabled={selectedTable.items.length === 0}
-                                    className="col-span-1 h-12 bg-primary hover:bg-primary-hover text-background rounded-xl font-bold flex items-center justify-center gap-2 transition-all shadow-lg shadow-primary/20 disabled:opacity-50 disabled:shadow-none"
-                                >
-                                    <CreditCard size={18} /> {t('Pay')}
-                                </button>
-                                <button onClick={handleOpenTransfer} className="col-span-2 h-9 bg-transparent border border-border/50 text-secondary hover:text-text-main hover:bg-surface rounded-lg text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 transition-all">
-                                    <ArrowRightLeft size={14} /> {t('Split / Merge Table')}
-                                </button>
-                            </>
-                        )}
-                    </div>
-                 </div>
-               </div>
-            )}
-
-            {/* --- EDITOR TOOLBAR (Restored) --- */}
-            {isEditMode && activeEditingTable && (
-               <div 
-                 style={{ 
-                   left: `${activeEditingTable.x}%`, 
-                   top: `${activeEditingTable.y}%`,
-                   width: `${activeEditingTable.width}px`,
-                   height: `${activeEditingTable.height}px`
-                 }} 
-                 className="absolute z-50 pointer-events-none"
-               >
-                 <div 
-                   onMouseDown={(e) => e.stopPropagation()}
-                   onClick={(e) => e.stopPropagation()}
-                   className={`pointer-events-auto absolute left-1/2 -translate-x-1/2 w-[240px] bg-surface/95 backdrop-blur-md border border-primary/20 rounded-xl shadow-2xl p-3 flex flex-col gap-3 animate-in zoom-in-95 duration-200
-                     ${activeEditingTable.y < 50 ? 'top-[105%] origin-top' : 'bottom-[105%] origin-bottom'}
-                   `}
-                 >
-                    <div className="flex items-center gap-2 pb-2 border-b border-primary/20">
-                        <Type size={16} className="text-secondary" />
-                        <input 
-                          type="text" 
-                          value={activeEditingTable.label}
-                          onChange={(e) => handleUpdateTableProps(activeEditingTable.id, 'label', e.target.value)}
-                          className="flex-1 bg-transparent border-b border-secondary/20 text-text-main font-bold text-sm focus:border-primary outline-none px-1 py-0.5 placeholder-secondary/50"
-                          placeholder="Name"
-                        />
-                        <button onClick={(e) => handleDeleteTable(activeEditingTable.id, e)} className="text-red-500 hover:text-white hover:bg-red-500 p-1.5 rounded transition-colors"><Trash2 size={16}/></button>
-                    </div>
-
-                    <div>
-                        <span className="text-[10px] uppercase font-bold text-secondary mb-1 block">{t('Shape')}</span>
-                        <div className="flex gap-1 bg-background/50 p-1 rounded-lg border border-primary/10">
-                            {[
-                            { val: 'square', icon: Square },
-                            { val: 'round', icon: Circle },
-                            { val: 'rect', icon: RectangleHorizontal }
-                            ].map((opt) => (
-                            <button 
-                                key={opt.val}
-                                onClick={(e) => handleUpdateTableProps(activeEditingTable.id, 'shape', opt.val, e)}
-                                className={`flex-1 flex items-center justify-center py-1.5 rounded-md transition-all ${activeEditingTable.shape === opt.val ? 'bg-primary text-background shadow-sm' : 'text-secondary hover:text-primary hover:bg-primary/10'}`}
-                            >
-                                <opt.icon size={16} />
-                            </button>
-                            ))}
+                      ) : (
+                        <div className="flex gap-2.5">
+                          <button
+                            onClick={() => {
+                              setCurrentOrderItems(enriched.map((x: any) => ({ ...x, isNew: false })));
+                              setIsAddItemsModalOpen(true);
+                            }}
+                            className="flex-1 h-11 bg-surface border border-border rounded-xl font-black text-xs flex items-center justify-center gap-2 hover:border-emerald-500/50 hover:bg-emerald-500/5 transition-all text-text-main shadow-sm"
+                            style={{ minHeight: 'var(--pos-btn-h)' }}
+                          >
+                            <Plus size={16} className="text-emerald-500" /> {t('Add Items')}
+                          </button>
+                          <button
+                            onClick={() => setShowPaymentModal(true)}
+                            className="flex-1 h-11 bg-primary text-background rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-primary/20 hover:brightness-105 transition-all"
+                            style={{ minHeight: 'var(--pos-btn-h)' }}
+                          >
+                            <CreditCard size={16} /> {t('Pay')}
+                          </button>
                         </div>
+                      )}
                     </div>
-
-                    <div>
-                        <span className="text-[10px] uppercase font-bold text-secondary mb-1 block">{t('Seats')}</span>
-                        <div className="flex items-center justify-between bg-background/50 p-1.5 rounded-lg px-2 border border-primary/10">
-                            <span className="text-xs font-bold text-secondary flex items-center gap-1"><Users size={12}/> {t('Guests')}</span>
-                            <div className="flex items-center gap-3">
-                                <button onClick={(e) => handleUpdateTableProps(activeEditingTable.id, 'seats', Math.max(1, activeEditingTable.seats - 1), e)} className="size-6 flex items-center justify-center rounded bg-background border border-primary/20 text-text-main hover:bg-primary hover:text-background transition-colors"><Minus size={14}/></button>
-                                <span className="text-sm font-bold text-text-main w-4 text-center">{activeEditingTable.seats}</span>
-                                <button onClick={(e) => handleUpdateTableProps(activeEditingTable.id, 'seats', activeEditingTable.seats + 1, e)} className="size-6 flex items-center justify-center rounded bg-background border border-primary/20 text-text-main hover:bg-primary hover:text-background transition-colors"><Plus size={14}/></button>
-                            </div>
-                        </div>
-                    </div>
-                 </div>
-               </div>
-            )}
-        </div>
-
-        {isEditMode && (
-           <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex items-center z-40 animate-in slide-in-from-bottom-10">
-              <div className="bg-surface/90 backdrop-blur-xl border border-primary/20 rounded-full px-6 py-3 shadow-2xl flex items-center gap-4">
-                  {TABLE_TEMPLATES.map((tpl, idx) => (
-                      <button key={idx} onClick={() => handleAddTable(tpl)} className="group relative flex flex-col items-center gap-1 transition-all hover:scale-110 active:scale-95">
-                         <div className="size-10 rounded-xl bg-background border border-primary/20 flex items-center justify-center text-secondary group-hover:text-primary group-hover:border-primary group-hover:bg-primary/10 transition-colors"><tpl.icon size={20} /></div>
-                         <span className="absolute -top-10 left-1/2 -translate-x-1/2 bg-surface px-2 py-1 rounded text-[10px] text-primary whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none border border-primary/20">{tpl.label}</span>
-                      </button>
-                  ))}
-                  <div className="w-px h-8 bg-primary/20 mx-2"></div>
-                  <button onClick={() => handleAddTable()} className="size-10 rounded-full bg-primary text-background flex items-center justify-center hover:bg-primary-hover transition-all hover:scale-110 shadow-lg shadow-primary/20" title="Add Custom Table"><Plus size={24} /></button>
-              </div>
-           </div>
+                  </div>
+                </div>
+              );
+            })()}
+          </div>
         )}
       </div>
 
-      {/* --- MENU MODAL --- */}
-      {showMenuModal && (
-          <div className="fixed inset-0 z-[60] bg-background flex flex-col animate-in slide-in-from-bottom-5 duration-200">
-              <div className="flex-1 flex overflow-hidden">
-                  {/* LEFT: MENU GRID */}
-                  <div className="w-full lg:w-[70%] flex flex-col border-r border-border">
-                       <div className="h-16 flex items-center justify-between px-6 border-b border-border bg-surface/50">
-                           <h2 className="text-xl font-bold text-text-main flex items-center gap-2"><ShoppingBag className="text-primary" /> {t('Menu')}</h2>
-                           <div className="flex items-center gap-2">
-                               {['All', 'Coffee', 'Non Coffee', 'Matcha', 'Food'].map(cat => (
-                                   <button key={cat} onClick={() => setMenuCategory(cat)} className={`px-4 py-1.5 rounded-full text-xs font-bold transition-all ${menuCategory === cat ? 'bg-primary text-background' : 'bg-surface border border-border text-secondary hover:text-text-main'}`}>{t(cat)}</button>
-                               ))}
-                           </div>
-                       </div>
-                       <div className="flex-1 overflow-y-auto p-6 bg-background custom-scrollbar">
-                           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                               {filteredMenu.map(item => (
-                                   <button key={item.id} onClick={() => handleAddToOrder(item)} disabled={item.stock <= 0} className={`bg-surface border border-border rounded-2xl p-3 flex flex-col gap-3 hover:border-primary transition-all text-left group shadow-sm ${item.stock <= 0 ? 'opacity-50 grayscale' : ''}`}>
-                                       <div className="aspect-[4/3] bg-background rounded-xl overflow-hidden relative">
-                                           {item.image ? <img src={item.image} className="w-full h-full object-cover group-hover:scale-105 transition-transform" /> : <div className="w-full h-full flex items-center justify-center text-xs text-secondary">No Image</div>}
-                                           {item.stock <= 0 && <div className="absolute inset-0 bg-black/60 flex items-center justify-center text-xs font-black text-white uppercase tracking-widest">Sold Out</div>}
-                                       </div>
-                                       <div>
-                                           <h4 className="font-bold text-text-main text-sm line-clamp-1">{item.name}</h4>
-                                           <p className="text-primary font-bold text-sm mt-1">{formatPrice(item.price)}</p>
-                                       </div>
-                                   </button>
-                               ))}
-                           </div>
-                       </div>
-                  </div>
-                  
-                  {/* RIGHT: CART */}
-                  <div className="w-full lg:w-[30%] bg-surface flex flex-col h-full shadow-2xl relative z-10">
-                       <div className="h-16 flex items-center justify-between px-6 border-b border-border bg-background">
-                           <h3 className="font-bold text-text-main">{t('Current Order')}</h3>
-                           <button onClick={() => setShowMenuModal(false)} className="size-8 rounded-full bg-border/50 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors"><X size={18} /></button>
-                       </div>
-                       
-                       <div className="p-4 bg-primary/5 border-b border-primary/10 flex justify-between items-center">
-                           <div className="flex flex-col">
-                               <span className="text-xs font-bold text-secondary uppercase">{t('Table')}</span>
-                               <span className="text-lg font-black text-text-main">{selectedTable?.label}</span>
-                           </div>
-                           <div className="text-right">
-                               <span className="text-xs font-bold text-secondary uppercase">{t('Guests')}</span>
-                               <span className="text-lg font-black text-text-main block">{guestCount}</span>
-                           </div>
-                       </div>
+      {/* ... (Existing Modals) ... */}
 
-                       <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-                            {currentOrderItems.length === 0 ? (
-                                <div className="h-full flex flex-col items-center justify-center text-secondary opacity-50 space-y-4">
-                                    <ShoppingBag size={48} strokeWidth={1} />
-                                    <p>{t('Cart is empty')}</p>
-                                </div>
-                            ) : (
-                                currentOrderItems.map(item => (
-                                    <div key={item.id} className="bg-background rounded-xl p-3 flex items-center gap-3 border border-border shadow-sm">
-                                        <div className="flex flex-col items-center gap-1 bg-surface border border-border rounded-lg p-1">
-                                            <button onClick={() => handleUpdateOrderQty(item.id, 1)} className="hover:text-primary"><Plus size={14}/></button>
-                                            <span className="font-bold text-text-main text-xs">{item.qty}</span>
-                                            <button onClick={() => handleUpdateOrderQty(item.id, -1)} className="hover:text-primary"><Minus size={14}/></button>
-                                        </div>
-                                        <div className="flex-1">
-                                            <p className="text-text-main font-bold text-sm line-clamp-1">{item.name}</p>
-                                            <p className="text-primary text-xs font-medium">{formatPrice(item.price)}</p>
-                                        </div>
-                                        <div className="text-right">
-                                            <p className="text-text-main font-bold">{formatPrice(item.price * item.qty)}</p>
-                                            <button onClick={() => handleRemoveFromOrder(item.id)} className="text-[10px] text-red-500 hover:underline">Remove</button>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                       </div>
-
-                       <div className="p-6 bg-background border-t border-border space-y-4 mt-auto shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
-                           <div className="flex justify-between text-xl font-bold text-text-main">
-                               <span>{t('Total')}</span>
-                               <span className="text-primary">{formatPrice(calculateTotal(currentOrderItems))}</span>
-                           </div>
-                           <button onClick={handleConfirmOrder} className="w-full py-4 bg-primary text-background font-bold rounded-xl hover:bg-primary-hover shadow-lg shadow-primary/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98]">
-                               <Check size={20} /> {t('Confirm Order')}
-                           </button>
-                       </div>
-                  </div>
+      {/* ... Add Items Modal ... */}
+      {isAddItemsModalOpen && (
+        <div className="fixed inset-0 z-[100] bg-background flex flex-col animate-in slide-in-from-bottom duration-300">
+          <div className="h-16 flex items-center justify-between px-6 border-b border-border bg-surface shrink-0 shadow-sm">
+            <div className="flex items-center gap-4">
+              <button onClick={() => setIsAddItemsModalOpen(false)} className="p-2 hover:bg-border rounded-xl transition-all">
+                <ArrowLeft size={24} />
+              </button>
+              <div>
+                <h2 className="text-xl font-black flex items-center gap-2">
+                  <Plus className="text-primary" /> {t('Add to Order')}
+                </h2>
+                <p className="text-[10px] font-bold text-secondary uppercase tracking-widest">{activeTable?.label}</p>
               </div>
+            </div>
+            <button onClick={() => setIsAddItemsModalOpen(false)} className="p-2 rounded-xl bg-border/20 flex items-center justify-center"><X size={24} /></button>
           </div>
-      )}
 
-      {/* --- PAYMENT MODAL --- */}
-      {showPaymentModal && selectedTable && selectedTable.orderId && (
-        <PaymentModal
-          isOpen={showPaymentModal}
-          onClose={() => setShowPaymentModal(false)}
-          onConfirm={handlePaymentConfirm}
-          onPrint={() => {
-              const fullOrder = {
-                  id: selectedTable.orderId,
-                  table: selectedTable.label,
-                  staff: selectedTable.waiter || 'Staff',
-                  items: selectedTable.items,
-                  total: calculateTotal(selectedTable.items),
-                  created_at: new Date().toISOString()
-              };
-              printOrderReceipt(fullOrder);
-          }}
-          totalAmount={calculateTotal(selectedTable.items)}
-          orderId={selectedTable.orderId}
-          isProcessing={isProcessingPayment}
+          <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+            <div className="flex-1 overflow-y-auto p-6 bg-surface/30 custom-scrollbar">
+              <div className="relative mb-6 max-w-md">
+                <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary" />
+                <input
+                  type="text"
+                  placeholder={t('Search Menu...')}
+                  value={addItemsSearch}
+                  onChange={e => setAddItemsSearch(e.target.value)}
+                  className="w-full bg-surface border border-border rounded-xl px-10 py-3 outline-none focus:ring-1 focus:ring-primary shadow-sm"
+                />
+              </div>
+              <div
+                className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 2xl:grid-cols-6 gap-4"
+                style={{ gap: 'var(--pos-gap)' }}
+              >
+                {filteredItemsForAdd.map((item: MenuItem) => (
+                  <button
+                    key={item.id}
+                    onClick={() => handleSelectItemToAdd(item)}
+                    className="bg-surface border border-border rounded-2xl p-3 text-left hover:border-primary transition-all group flex flex-col h-full shadow-sm relative active:scale-95"
+                    style={{ borderWidth: 'var(--pos-border-strong)' }}
+                  >
+                    <div className="aspect-video bg-background rounded-lg mb-2 overflow-hidden shrink-0">
+                      {item.image ? <img src={item.image} className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-secondary/30"><Utensils size={24} /></div>}
+                    </div>
+                    <h4 className="font-bold text-xs line-clamp-2 flex-1 mb-2 tracking-tight group-hover:text-primary transition-colors">{item.name}</h4>
+                    <p className="text-primary font-bold text-sm">{formatPrice(item.price)}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="w-full lg:w-[380px] h-[300px] lg:h-auto border-t lg:border-l lg:border-t-0 border-border bg-surface flex flex-col shadow-2xl shrink-0" style={{ borderWidth: 'var(--pos-border-strong)' }}>
+              <div className="p-5 border-b border-border bg-background/50 flex items-center justify-between">
+                <span className="font-bold text-xs uppercase tracking-widest text-primary">{t('Items to Add')}</span>
+                <span className="text-[10px] font-black bg-primary/10 text-primary px-2 py-0.5 rounded-full">{currentOrderItems.filter((i: any) => i.isNew).length} Món</span>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
+                {currentOrderItems.filter((i: any) => i.isNew).length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-secondary opacity-30 gap-3">
+                    <ShoppingBag size={48} strokeWidth={1} />
+                    <p className="text-xs font-bold">{t('Select Item to Add')}</p>
+                  </div>
+                ) : (
+                  currentOrderItems.filter((i: any) => i.isNew).map((it, idx) => (
+                    <div key={idx} className={`bg-background p-3 rounded-xl border transition-all ${(it as any).isNew ? 'border-primary/40 shadow-sm shadow-primary/5' : 'border-border opacity-80'}`}>
+                      <div className="flex items-start justify-between gap-2 mb-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-[13px] text-text-main truncate leading-tight">{it._display_name || it.snapshot_name}</p>
+                          {it.note && <p className="text-amber-600 text-[11px] font-bold italic leading-tight mt-1 line-clamp-2">{it.note}</p>}
+                          <p className="text-primary font-black text-xs mt-1">{formatPrice(it._display_price || it.price || 0)}</p>
+                        </div>
+                        <div className="flex items-center gap-1.5 bg-surface border border-border p-1 rounded-lg">
+                          <button onClick={() => {
+                            const next = [...currentOrderItems];
+                            const realIdx = currentOrderItems.indexOf(it);
+                            if (realIdx > -1) {
+                              if (next[realIdx].quantity > 1) {
+                                next[realIdx].quantity -= 1;
+                                setCurrentOrderItems(next);
+                              } else if ((next[realIdx] as any).isNew) {
+                                next.splice(realIdx, 1);
+                                setCurrentOrderItems(next);
+                              }
+                            }
+                          }} className="size-6 flex items-center justify-center hover:bg-border rounded text-secondary hover:text-red-500"><Minus size={12} /></button>
+                          <span className="font-black text-xs min-w-[20px] text-center">{it.quantity}</span>
+                          <button onClick={() => {
+                            const next = [...currentOrderItems];
+                            const realIdx = currentOrderItems.indexOf(it);
+                            if (realIdx > -1) {
+                              next[realIdx].quantity += 1;
+                              setCurrentOrderItems(next);
+                            }
+                          }} className="size-6 flex items-center justify-center hover:bg-border rounded text-secondary hover:text-primary"><Plus size={12} /></button>
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={() => {
+                          setNoteInput(it.note || '');
+                          const realIdx = currentOrderItems.indexOf(it);
+                          setEditingNoteItem({ idx: realIdx, currentNote: it.note || '', source: 'add_items' });
+                          setIsNoteModalOpen(true);
+                        }}
+                        className={`w-full flex items-center gap-2.5 p-2 rounded-lg text-left transition-all border ${it.note ? 'bg-amber-500/5 border-amber-500/20 shadow-sm' : 'bg-surface border-transparent hover:border-border'}`}
+                      >
+                        <div className={`p-1.5 rounded-md ${it.note ? 'bg-amber-500 text-white shadow-sm' : 'bg-secondary/10 text-secondary'}`}>
+                          <StickyNote size={14} />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          {it.note ? (
+                            <p className="text-amber-700 text-[10px] font-black uppercase tracking-tighter truncate">{it.note}</p>
+                          ) : (
+                            <span className="text-text-main text-xs font-bold">{t('Ghi chú')}</span>
+                          )}
+                        </div>
+                        <ChevronRight size={14} className="text-secondary/30" />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="p-6 pb-[calc(1.5rem+env(safe-area-inset-bottom))] border-t border-border bg-background/50 space-y-4">
+                <div className="flex justify-between items-end">
+                  <span className="text-xs font-bold text-secondary uppercase">{t('Total')}</span>
+                  <span className="text-3xl font-black text-primary">
+                    {formatPrice(currentOrderItems.reduce((s, it) => s + ((it._display_price || it.price || 0) * it.quantity), 0))}
+                  </span>
+                </div>
+                <button
+                  disabled={currentOrderItems.filter((i: any) => i.isNew).length === 0}
+                  onClick={handleConfirmAddItems}
+                  className="w-full py-4 bg-primary text-background font-bold text-lg rounded-xl shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-70"
+                  style={{ minHeight: 'var(--pos-btn-h)' }}
+                >
+                  <Check size={20} /> {t('Confirm Add')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {isNoteModalOpen && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-surface border border-border rounded-2xl w-full max-w-md p-6 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-amber-500/10 text-amber-500 rounded-lg"><StickyNote size={20} /></div>
+              <h3 className="font-bold text-text-main text-lg">{t('Ghi chú món ăn')}</h3>
+            </div>
+            <textarea
+              value={noteInput}
+              onChange={(e) => setNoteInput(e.target.value)}
+              className="w-full bg-background border border-border rounded-xl p-4 text-sm outline-none focus:ring-2 focus:ring-primary/50 transition-all min-h-[120px]"
+              placeholder="VD: Không đường, nhiều đá, ít sữa..."
+              autoFocus
+            />
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => setIsNoteModalOpen(false)} className="flex-1 py-3 border border-border rounded-xl font-bold text-secondary text-sm hover:bg-background transition-colors">{t('Hủy bỏ')}</button>
+              <button onClick={saveNote} className="flex-1 py-3 bg-primary text-background rounded-xl font-bold text-sm shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all">{t('Lưu ghi chú')}</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showTransferModal && activeTable && (
+        <TransferModal
+          isOpen={showTransferModal}
+          onClose={() => setShowTransferModal(false)}
+          onConfirm={handleTransferConfirm}
+          currentTable={activeTable}
+          allTables={tables}
+          isProcessing={isSubmitting}
         />
       )}
-
-      {/* --- TRANSFER MODAL --- */}
-      {showTransferModal && selectedTable && (
-          <TransferModal
-            isOpen={showTransferModal}
-            onClose={() => setShowTransferModal(false)}
-            onConfirm={handleTransferConfirm}
-            currentTable={selectedTable}
-            allTables={tables}
-            isProcessing={isProcessingTransfer}
+      {showPaymentModal && selectedTableId && (() => {
+        const active = (orders || []).find(o => String(o.table_id) === String(selectedTableId) && ['Pending', 'Cooking', 'Ready'].includes(o.status));
+        if (!active) return null;
+        const { totalAmount: subtotal } = enrichOrderDetails(active, menuItems);
+        return (
+          <PaymentModal
+            isOpen={showPaymentModal}
+            onClose={() => setShowPaymentModal(false)}
+            onConfirm={async (method, shouldPrint, discountInfo, paymentAmount) => {
+              setIsProcessingPayment(true);
+              try {
+                await checkoutSession(String(active.id), String(selectedTableId), method, discountInfo, paymentAmount);
+                if (shouldPrint) {
+                  const { items: enriched, totalAmount: subtotal } = enrichOrderDetails(active, menuItems);
+                  const discountAmount = discountInfo?.amount || 0;
+                  const finalTotal = Math.max(0, subtotal - discountAmount);
+                  const completedOrder = {
+                    ...active,
+                    table: (tables || []).find(t => t.id === selectedTableId)?.label,
+                    status: 'Completed',
+                    items: enriched,
+                    payment_method: method,
+                    total_amount: finalTotal,
+                    discount_amount: discountAmount,
+                    subtotal: subtotal,
+                    staff: user?.user_metadata?.full_name || 'POS'
+                  };
+                  if (isSandboxed() && settings.printMethod !== 'rawbt') {
+                    const html = await generateReceiptHTML(completedOrder, settings);
+                    openPreview({ html, title: 'In hóa đơn', meta: { action: 'FINAL_ON_PAYMENT' } });
+                  } else {
+                    printOrderReceipt(completedOrder, settings);
+                  }
+                }
+                setShowPaymentModal(false);
+                setSelectedTableId(null);
+              } finally {
+                setIsProcessingPayment(false);
+              }
+            }}
+            onPrint={() => {
+              if (isSandboxed() && settings.printMethod !== 'rawbt') {
+                generateReceiptHTML({ ...active, table: (tables || []).find(t => t.id === selectedTableId)?.label }, settings).then(html => {
+                  openPreview({ html, title: 'In hóa đơn', meta: { action: 'REPRINT_ON_EDIT' } });
+                });
+              } else {
+                printOrderReceipt({ ...active, table: (tables || []).find(t => t.id === selectedTableId)?.label }, settings);
+              }
+            }}
+            totalAmount={subtotal}
+            paidAmount={getPaidAmount(active)}
+            orderId={String(active.id)}
+            isProcessing={isProcessingPayment}
+            discount={active.discount_amount ? {
+              amount: active.discount_amount,
+              type: active.discount_type || 'amount',
+              value: active.discount_value || active.discount_amount
+            } : undefined}
           />
-      )}
+        );
+      })()}
+
+      {/* Floorplan table delete confirmation */}
+      <ConfirmModal
+        isOpen={!!pendingDeleteTableId}
+        title={t('Delete Table')}
+        message={t('Are you sure you want to delete this table?')}
+        onClose={() => setPendingDeleteTableId(null)}
+        onConfirm={handleConfirmDeleteTable}
+        isDanger={true}
+        confirmText={t('Delete')}
+      />
     </div>
   );
 };
