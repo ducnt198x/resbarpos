@@ -36,8 +36,11 @@ export const useSettingsLogic = () => {
 
   const [notification, setNotification] = useState<{msg: string, type: 'success' | 'error' | 'warning' | 'info'} | null>(null);
   const [printPreviewHtml, setPrintPreviewHtml] = useState<string | null>(null);
+  const [demoTick, setDemoTick] = useState(0);
   
   const { settings, printer } = state;
+
+  const demoInfo = useMemo(() => DemoService.getInfo(), [demoTick]);
 
   // --- DYNAMIC CARD STATUS CALCULATOR ---
   const cardStatuses = useMemo(() => {
@@ -128,7 +131,37 @@ export const useSettingsLogic = () => {
   };
 
   const handleAction = async (actionId: string, payload?: any) => {
+    const demoInfo = DemoService.getInfo();
+    // Demo/trial: block sync + import/export until unlocked
+    if (demoInfo.enabled && !demoInfo.syncEnabled) {
+      if (actionId === 'export_data' || actionId === 'import_data' || actionId === 'sync_now') {
+        showToast('Bản demo: cần ID đồng bộ để mở chức năng này.', 'warning');
+        return;
+      }
+    }
+
     switch (actionId) {
+      case 'request_demo_sync': {
+        const res = await DemoService.requestSyncOnce();
+        if (res.ok) {
+          showToast('Đã gửi yêu cầu. Vui lòng liên hệ Đức Ngô để nhận ID đồng bộ.', 'success');
+          setDemoTick(t => t + 1);
+        } else {
+          showToast(res.message || 'Gửi yêu cầu thất bại', 'error');
+        }
+        return;
+      }
+      case 'enable_demo_sync': {
+        const inputId = String(payload?.id || '');
+        const res = DemoService.enableSyncWithId(inputId);
+        if (res.ok) {
+          showToast('Đã mở đồng bộ cho bản demo.', 'success');
+          setDemoTick(t => t + 1);
+        } else {
+          showToast(res.message || 'Không mở được đồng bộ', 'error');
+        }
+        return;
+      }
       case 'check_connection':
         showToast('Đang kiểm tra kết nối...', 'warning');
         bulkSet({ printerName: settings.printerName }); 
@@ -187,10 +220,6 @@ export const useSettingsLogic = () => {
         break;
 
       case 'sync_now':
-        if (DemoService.isDemo() && !DemoService.isSyncEnabled()) {
-            showToast('Demo Mode: Chưa mở khóa đồng bộ. Vào Settings → Yêu cầu đồng bộ.', 'warning');
-            return;
-        }
         if (!isOnline) {
             showToast('Không có mạng, không thể đồng bộ', 'error');
             return;
@@ -212,10 +241,6 @@ export const useSettingsLogic = () => {
         break;
 
       case 'export_data':
-        if (DemoService.isDemo() && !DemoService.isSyncEnabled()) {
-           showToast('Bản Demo không cho phép Xuất dữ liệu (cần mã mở khóa).', 'warning');
-           return;
-        }
         const exportGuard = await guardSensitive('export_data', async () => {
            const orders = await db.orders.toArray();
            const items = await db.order_items.toArray();
@@ -251,10 +276,6 @@ export const useSettingsLogic = () => {
         break;
 
       case 'import_data':
-        if (DemoService.isDemo() && !DemoService.isSyncEnabled()) {
-           showToast('Bản Demo không cho phép Nhập dữ liệu (cần mã mở khóa).', 'warning');
-           return;
-        }
         const importGuard = await guardSensitive('modify_system_settings', () => {
             const input = document.createElement('input');
             input.type = 'file';
@@ -331,6 +352,12 @@ export const useSettingsLogic = () => {
 
   const values: Record<string, any> = {
     ...settings,
+    demoEnabled: demoInfo.enabled,
+    demoDaysLeft: demoInfo.daysLeft,
+    demoShouldWarn: demoInfo.shouldWarn,
+    demoExpired: demoInfo.isExpired,
+    demoSyncRequested: demoInfo.syncRequested,
+    demoSyncEnabled: demoInfo.syncEnabled,
     isOnline, // Explicitly expose for UI boolean checks
     userEmail: user?.email || 'Chưa đăng nhập',
     printerName: getPrinterLabel(),

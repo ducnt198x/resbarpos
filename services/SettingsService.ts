@@ -155,13 +155,12 @@ export class SettingsService {
     const cleanInput = inputPin.trim();
     if (!/^\d{4}$/.test(cleanInput)) return false;
 
-    // Demo / Trial: default PIN is 0000 (offline)
+    // DEMO/TRIAL: local PIN 0000 always works (offline)
     try {
-      const isDemo = localStorage.getItem('demo_mode') === '1';
-      if (isDemo) {
-        return cleanInput === '0000';
+      if (localStorage.getItem('nepos_demo_enabled') === '1' && cleanInput === '0000') {
+        return true;
       }
-    } catch {
+    } catch (e) {
       // ignore
     }
 

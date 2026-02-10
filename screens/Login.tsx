@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, Eye, EyeOff, ArrowRight, ChefHat, Sparkles, ShieldCheck, Timer, KeyRound } from 'lucide-react';
+import { Mail, Lock, Eye, EyeOff, ArrowRight, ChefHat, Shield, Briefcase, UserRound, Users } from 'lucide-react';
 import { supabase } from '../supabase';
 import { useTheme } from '../ThemeContext';
 import { useAuth } from '../AuthContext';
@@ -14,8 +14,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-
-  // Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
@@ -26,25 +24,49 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setLoading(true);
 
     try {
-      // Demo build: Sign In only (no Sign Up)
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
-
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       onLogin();
     } catch (error: any) {
       console.error(error);
-      if (error?.message === 'Failed to fetch') {
+      if (error.message === 'Failed to fetch') {
         setErrorMsg('Connection failed. Please check your internet connection.');
       } else {
-        setErrorMsg(error?.message || 'Authentication failed');
+        setErrorMsg(error.message || 'Authentication failed');
       }
     } finally {
       setLoading(false);
     }
   };
+
+  const DemoRoleCard = ({
+    title,
+    subtitle,
+    icon,
+    onClick,
+  }: {
+    title: string;
+    subtitle: string;
+    icon: React.ReactNode;
+    onClick: () => void;
+  }) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="group w-full text-left p-4 rounded-2xl border border-border bg-surface hover:bg-primary/5 hover:border-primary/30 transition-all duration-200 shadow-sm hover:shadow-md hover:-translate-y-0.5"
+    >
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5 size-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center group-hover:bg-primary/15 transition-colors">
+          {icon}
+        </div>
+        <div className="flex-1">
+          <div className="font-black text-text-main">{title}</div>
+          <div className="text-xs font-bold text-secondary mt-1">{subtitle}</div>
+        </div>
+        <ArrowRight className="text-secondary group-hover:text-primary transition-colors" size={18} />
+      </div>
+    </button>
+  );
 
   return (
     <div className="flex w-full h-screen bg-background text-text-main relative transition-colors">
@@ -64,87 +86,61 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
             <ChefHat size={48} strokeWidth={2} />
           </div>
           <h1 className="text-4xl font-bold mb-4 text-white">{t('Nepos System')}</h1>
-          <p className="text-lg text-gray-300 leading-relaxed">
-            {t('LoginDescription')}
-          </p>
+          <p className="text-lg text-gray-300 leading-relaxed">{t('LoginDescription')}</p>
         </div>
       </div>
 
       {/* Right Form Side */}
       <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-background">
-        <div className="w-full max-w-md space-y-8">
+        <div className="w-full max-w-md space-y-6">
           <div className="text-center lg:text-left animate-in slide-in-from-bottom-4 duration-500">
-            <h2 className="text-3xl font-bold tracking-tight text-text-main">
-              {t('Welcome to Nepos')}
-            </h2>
-            <p className="text-secondary mt-2">
-              {t('Login text')}
-            </p>
+            <h2 className="text-3xl font-bold tracking-tight text-text-main">{t('Welcome to Nepos')}</h2>
+            <p className="text-secondary mt-2">{t('Login text')}</p>
           </div>
 
-          {/* Trial / Demo Card */}
-          <div className="rounded-2xl border border-border bg-surface p-4 shadow-sm hover:shadow-lg hover:shadow-primary/5 transition-all">
-            <div className="flex items-start gap-3">
-              <div className="size-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center border border-primary/20">
-                <Sparkles size={20} />
-              </div>
-              <div className="flex-1">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-black text-text-main">{t('Dùng thử 30 ngày')}</h3>
-                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                    Trial
-                  </span>
+          {/* Trial / Demo */}
+          <div className="p-4 rounded-2xl border border-border bg-surface shadow-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <div className="size-9 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                  <Shield size={18} />
                 </div>
-                <p className="text-xs text-secondary mt-1 leading-relaxed">
-                  {t('Trải nghiệm bản đầy đủ tính năng (offline). Dữ liệu tự xoá khi hết hạn. Mở đồng bộ/nhập-xuất bằng mã từ server.')}
-                </p>
-
-                <div className="grid grid-cols-3 gap-2 mt-3">
-                  <button
-                    type="button"
-                    onClick={() => signInDemo('admin')}
-                    className="group rounded-xl border border-border bg-background hover:border-primary/40 hover:shadow-md transition-all p-2 text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <ShieldCheck size={14} className="text-primary" />
-                      <span className="text-xs font-black">Demo Admin</span>
-                    </div>
-                    <p className="text-[10px] text-secondary mt-0.5">Toàn quyền</p>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => signInDemo('manager')}
-                    className="group rounded-xl border border-border bg-background hover:border-primary/40 hover:shadow-md transition-all p-2 text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <KeyRound size={14} className="text-primary" />
-                      <span className="text-xs font-black">Demo QL</span>
-                    </div>
-                    <p className="text-[10px] text-secondary mt-0.5">Vận hành</p>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => signInDemo('staff')}
-                    className="group rounded-xl border border-border bg-background hover:border-primary/40 hover:shadow-md transition-all p-2 text-left"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Timer size={14} className="text-primary" />
-                      <span className="text-xs font-black">Demo NV</span>
-                    </div>
-                    <p className="text-[10px] text-secondary mt-0.5">Bán hàng</p>
-                  </button>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between text-[11px] text-secondary">
-                  <span className="font-bold">
-                    PIN demo: <span className="font-mono text-text-main">0000</span>
-                  </span>
-                  <span className="font-medium">Cài đặt → “YÊU CẦU ĐỒNG BỘ”</span>
+                <div>
+                  <div className="font-black text-text-main">Trial / Demo</div>
+                  <div className="text-xs font-bold text-secondary">30 ngày trải nghiệm · Full tính năng</div>
                 </div>
               </div>
+              <div className="text-[11px] font-black px-2.5 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">PIN: 0000</div>
             </div>
+            <div className="mt-3 grid grid-cols-1 gap-2">
+              <DemoRoleCard
+                title="Demo Admin"
+                subtitle="Toàn quyền cấu hình & vận hành"
+                icon={<Users size={18} />}
+                onClick={() => signInDemo('admin')}
+              />
+              <DemoRoleCard
+                title="Demo Quản lý"
+                subtitle="Quản lý ca, báo cáo, kiểm soát"
+                icon={<Briefcase size={18} />}
+                onClick={() => signInDemo('manager')}
+              />
+              <DemoRoleCard
+                title="Demo Nhân viên"
+                subtitle="Bán hàng hằng ngày, thao tác nhanh"
+                icon={<UserRound size={18} />}
+                onClick={() => signInDemo('staff')}
+              />
+            </div>
+            <div className="mt-3 text-xs text-secondary font-medium">
+              Bản demo chạy cục bộ, tự xoá sau 30 ngày. Nếu cần đồng bộ: vào <strong className="text-text-main">Cài đặt</strong> → <strong className="text-text-main">YÊU CẦU ĐỒNG BỘ</strong>.
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="h-px bg-border flex-1" />
+            <div className="text-xs font-bold text-secondary">Hoặc đăng nhập</div>
+            <div className="h-px bg-border flex-1" />
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -159,7 +155,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     type="email"
                     placeholder="manager@nepos.com"
                     value={email}
-                    onChange={e => setEmail(e.target.value)}
+                    onChange={(e) => setEmail(e.target.value)}
                     className="w-full bg-surface border border-border rounded-xl py-3.5 pl-10 pr-4 text-text-main placeholder-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all shadow-sm"
                     required
                   />
@@ -176,7 +172,7 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
                     type={showPassword ? 'text' : 'password'}
                     placeholder="••••••••"
                     value={password}
-                    onChange={e => setPassword(e.target.value)}
+                    onChange={(e) => setPassword(e.target.value)}
                     className="w-full bg-surface border border-border rounded-xl py-3.5 pl-10 pr-12 text-text-main placeholder-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all shadow-sm"
                     required
                   />
@@ -197,24 +193,17 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
               </div>
             )}
 
-            <div className="flex items-center justify-between text-sm">
-              <label className="flex items-center gap-2 cursor-pointer group">
-                <input type="checkbox" className="w-4 h-4 rounded border-border bg-surface text-primary focus:ring-offset-background focus:ring-primary" />
-                <span className="text-secondary group-hover:text-text-main transition-colors">{t('Remember me')}</span>
-              </label>
-              <a href="#" className="font-bold text-primary hover:text-primary-hover hover:underline">{t('Forgot password?')}</a>
-            </div>
-
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-primary hover:bg-primary-hover text-background font-bold h-12 rounded-xl transition-all shadow-lg shadow-primary/20 hover:shadow-primary/40 active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+              className="w-full px-6 py-3.5 bg-primary hover:bg-primary-hover text-background rounded-xl font-black transition-all shadow-lg shadow-primary/20 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
-                <div className="size-5 border-2 border-background/30 border-t-background rounded-full animate-spin" />
+                <div className="w-5 h-5 border-2 border-background/30 border-t-background rounded-full animate-spin" />
               ) : (
                 <>
-                  {t('Sign In')} <ArrowRight size={20} />
+                  {t('Sign In')}
+                  <ArrowRight size={20} />
                 </>
               )}
             </button>

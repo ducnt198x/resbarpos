@@ -182,6 +182,8 @@ const SYNC_HANDLERS: Record<QueueActionType, (data: any) => Promise<void>> = {
 
   'table_layout_sync': async (data) => {
     const { tables } = data;
+    if (!Array.isArray(tables)) return;
+
     const payload = tables.map((t: any) => ({
       id: t.id,
       label: t.label,
@@ -201,15 +203,17 @@ const SYNC_HANDLERS: Record<QueueActionType, (data: any) => Promise<void>> = {
     }
 
     // 2. Prune Tables (Delete those not in the new list)
-    const activeIds = payload.map((t: any) => t.id);
+    const activeIds = payload.map((t: any) => t.id).filter(Boolean); // Strict filter
+    
     let query = supabase.from('tables').delete();
     
+    // FIX: Safer filter logic to avoid PGRST100
     if (activeIds.length > 0) {
-        // Fix: Pass array directly to 'in' filter. Do not format as string.
-        query = query.not('id', 'in', activeIds);
+        // Standard delete: everything NOT in the active list
+        query = query.not('id', 'in', `(${activeIds.join(',')})`);
     } else {
-        // Careful: If array is empty, we delete ALL tables (user cleared floor plan)
-        // We use a safe filter to select all rows (id is not null)
+        // Edge case: empty list -> delete ALL tables
+        // Safer to check non-null IDs than rely on 'not in empty array' behavior
         query = query.not('id', 'is', null);
     }
 
@@ -276,15 +280,14 @@ export const NetworkProvider: React.FC<{ children: ReactNode }> = ({ children })
     if (!navigator.onLine && !force) return false;
     if (syncMutex.current) return false;
 
-    // Demo / Trial: block sync until unlocked by server code
-    if (DemoService.isDemo() && !DemoService.isSyncEnabled()) {
-      setLastSyncError('Demo mode: sync is locked. Enter unlock code in Settings.');
+    // DEMO/TRIAL: block sync until unlocked by ID
+    if (DemoService.isDemo() && !DemoService.isSyncEnabled() && !force) {
       return false;
     }
 
     const { data: { session } } = await supabase.auth.getSession();
-    // In demo mode, we allow anon-based sync if RLS policies permit.
-    if (!session && !DemoService.isDemo()) return false;
+    // In demo mode, allow syncing with anon key after unlock (RLS must allow)
+    if (!session && !(DemoService.isDemo() && DemoService.isSyncEnabled())) return false;
 
     const queueCount = await db.offline_queue.count();
     if (queueCount === 0) {

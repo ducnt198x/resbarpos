@@ -2,7 +2,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { supabase } from './supabase';
 import { SETTINGS_STORAGE_KEY } from './services/SettingsService';
-import { DemoService, DemoRole } from './services/DemoService';
+import { DemoService } from './services/DemoService';
 
 type UserRole = 'admin' | 'manager' | 'staff';
 
@@ -11,11 +11,8 @@ interface AuthContextType {
   role: UserRole;
   loading: boolean;
   signOut: () => Promise<void>;
-
-  // Demo / Trial
+  signInDemo: (role: UserRole) => Promise<void>;
   isDemo: boolean;
-  demoRole: DemoRole | null;
-  signInDemo: (role: DemoRole) => Promise<void>;
   
   // Lock Screen functionality
   isLocked: boolean;
@@ -44,27 +41,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   
   const [loading, setLoading] = useState(!user);
   const [isLocked, setIsLocked] = useState(false);
-  const [isDemo, setIsDemo] = useState<boolean>(() => DemoService.isDemo());
-  const [demoRole, setDemoRole] = useState<DemoRole | null>(() => DemoService.getRole());
-
-  const buildDemoUser = (r: DemoRole): any => {
-    const deviceId = (() => {
-      try { return localStorage.getItem('resbar_device_id') || 'local'; } catch { return 'local'; }
-    })();
-    return {
-      id: `DEMO_${deviceId}`,
-      email: `demo+${r}@nepos.local`,
-      user_metadata: {
-        full_name: 'Trial User',
-        role: r,
-        is_demo: true
-      },
-      app_metadata: {
-        role: r,
-        is_demo: true
-      }
-    };
-  };
+  const [isDemo, setIsDemo] = useState(() => DemoService.isDemo());
 
   /**
    * Clears ONLY auth-related keys from storage.
@@ -131,42 +108,11 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     const initAuth = async () => {
       try {
-        // DEMO SHORT-CIRCUIT: no Supabase session needed
-        if (DemoService.isDemo()) {
-          setIsDemo(true);
-          setDemoRole(DemoService.getRole());
-          // enforce expiry on boot
-          const res = await DemoService.enforceLifecycle();
-          if (res.wiped) {
-            clearAuth();
-            return;
-          }
-
-          // Restore demo user from cache if needed
-          const cached = localStorage.getItem('auth_user');
-          if (cached) {
-            try {
-              const demoUser = JSON.parse(cached);
-              setUser(demoUser);
-              const cachedRole = localStorage.getItem('auth_role') as UserRole | null;
-              if (cachedRole === 'admin' || cachedRole === 'manager' || cachedRole === 'staff') {
-                setRole(cachedRole);
-              }
-              setLoading(false);
-              return;
-            } catch {
-              // continue to create a new demo user
-            }
-          }
-
-          // Create minimal demo user object
-          const r = DemoService.getRole() || 'staff';
-          const demoUser = buildDemoUser(r);
-          setUser(demoUser);
-          setRole(r as UserRole);
-          localStorage.setItem('auth_user', JSON.stringify(demoUser));
-          localStorage.setItem('auth_role', r);
-          setLoading(false);
+        // DEMO/TRIAL expiry enforcement before doing any auth
+        const expiry = await DemoService.enforceExpiry();
+        if (expiry.expired) {
+          clearAuth();
+          setIsDemo(false);
           return;
         }
 
@@ -182,8 +128,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (session) {
           await handleUserUpdate(session.user);
+          setIsDemo(DemoService.isDemo());
         } else {
           if (navigator.onLine) clearAuth();
+          setIsDemo(DemoService.isDemo());
         }
       } catch (e) {
         console.warn("Auth initialization warning:", e);
@@ -208,16 +156,23 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => subscription.unsubscribe();
   }, []);
 
-  const signInDemo = async (r: DemoRole) => {
-    await DemoService.startDemo(r);
-    setIsDemo(true);
-    setDemoRole(r);
+  const signInDemo = async (demoRole: UserRole) => {
+    await DemoService.startDemo(demoRole);
+    const fakeUser = {
+      id: `demo_${demoRole}`,
+      email: `demo_${demoRole}@nepos.local`,
+      user_metadata: {
+        role: demoRole,
+        full_name: demoRole === 'admin' ? 'Demo Admin' : demoRole === 'manager' ? 'Demo Quản lý' : 'Demo Nhân viên'
+      },
+      app_metadata: { role: demoRole }
+    };
 
-    const demoUser = buildDemoUser(r);
-    setUser(demoUser);
-    setRole(r as UserRole);
-    localStorage.setItem('auth_user', JSON.stringify(demoUser));
-    localStorage.setItem('auth_role', r);
+    setUser(fakeUser);
+    setRole(demoRole);
+    localStorage.setItem('auth_user', JSON.stringify(fakeUser));
+    localStorage.setItem('auth_role', demoRole);
+    setIsDemo(true);
     setLoading(false);
   };
 
@@ -225,13 +180,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     try {
       const u = user;
       clearAuth();
-      // Demo: also wipe demo flags (keeps Settings safe per requirement)
-      if (DemoService.isDemo()) {
-        await DemoService.wipeAllDemoData();
-        setIsDemo(false);
-        setDemoRole(null);
-        return;
-      }
       if (u && navigator.onLine) {
         await supabase.auth.signOut();
       }
@@ -244,7 +192,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const unlockApp = () => setIsLocked(false);
 
   return (
-    <AuthContext.Provider value={{ user, role, loading, signOut, isDemo, demoRole, signInDemo, isLocked, lockApp, unlockApp }}>
+    <AuthContext.Provider value={{ user, role, loading, signOut, signInDemo, isDemo, isLocked, lockApp, unlockApp }}>
       {children}
     </AuthContext.Provider>
   );

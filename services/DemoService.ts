@@ -2,222 +2,187 @@ import { db } from '../db';
 import { SettingsService } from './SettingsService';
 import { supabase } from '../supabase';
 
-export type DemoRole = 'admin' | 'manager' | 'staff';
+type DemoRole = 'admin' | 'manager' | 'staff';
 
-/**
- * Demo/trial lifecycle manager (client-side only).
- *
- * Requirements implemented:
- * - 3 demo roles for new users to test
- * - Demo data is local-only by default (no server sync / no import-export)
- * - 30-day experience, warn in last 5 days
- * - Auto wipe local data after 30 days unless unlocked
- * - “Request sync” creates a row in server table demo_codes and stores returned id
- * - Entering correct code unlocks sync/import/export
- */
+const LS = {
+  enabled: 'nepos_demo_enabled',
+  role: 'nepos_demo_role',
+  startedAt: 'nepos_demo_started_at',
+  expiresAt: 'nepos_demo_expires_at',
+  syncEnabled: 'nepos_demo_sync_enabled',
+  syncRequestId: 'nepos_demo_sync_request_id',
+} as const;
+
+export type DemoInfo = {
+  enabled: boolean;
+  role: DemoRole;
+  startedAt: string;
+  expiresAt: string;
+  daysLeft: number;
+  shouldWarn: boolean;
+  isExpired: boolean;
+  syncRequested: boolean;
+  syncEnabled: boolean;
+};
+
+const daysBetween = (from: Date, to: Date) => {
+  const ms = to.getTime() - from.getTime();
+  return Math.ceil(ms / (1000 * 60 * 60 * 24));
+};
+
 export class DemoService {
-  private static KEY_MODE = 'demo_mode';
-  private static KEY_ROLE = 'demo_role';
-  private static KEY_STARTED_AT = 'demo_started_at';
-  private static KEY_EXPIRES_AT = 'demo_expires_at';
-  private static KEY_SYNC_ENABLED = 'demo_sync_enabled';
-  private static KEY_SYNC_REQUEST_ID = 'demo_sync_request_id';
-  private static KEY_SYNC_UNLOCKED_AT = 'demo_sync_unlocked_at';
-  private static KEY_SEEDED = 'demo_seeded_v1';
-
-  public static isDemo(): boolean {
-    return localStorage.getItem(DemoService.KEY_MODE) === '1';
+  static isDemo(): boolean {
+    return localStorage.getItem(LS.enabled) === '1';
   }
 
-  public static getRole(): DemoRole | null {
-    const r = localStorage.getItem(DemoService.KEY_ROLE);
-    return (r === 'admin' || r === 'manager' || r === 'staff') ? r : null;
+  static getDemoRole(): DemoRole {
+    const r = (localStorage.getItem(LS.role) || 'staff') as DemoRole;
+    return (r === 'admin' || r === 'manager' || r === 'staff') ? r : 'staff';
   }
 
-  public static isSyncEnabled(): boolean {
-    return localStorage.getItem(DemoService.KEY_SYNC_ENABLED) === '1';
+  static isSyncEnabled(): boolean {
+    return localStorage.getItem(LS.syncEnabled) === '1';
   }
 
-  public static getSyncRequestId(): string | null {
-    return localStorage.getItem(DemoService.KEY_SYNC_REQUEST_ID);
+  static getSyncRequestId(): string | null {
+    return localStorage.getItem(LS.syncRequestId);
   }
 
-  public static getLifecycle(): { startedAt: number | null; expiresAt: number | null; daysLeft: number | null } {
-    const startedAt = Number(localStorage.getItem(DemoService.KEY_STARTED_AT) || '');
-    const expiresAt = Number(localStorage.getItem(DemoService.KEY_EXPIRES_AT) || '');
-
-    const s = Number.isFinite(startedAt) ? startedAt : null;
-    const e = Number.isFinite(expiresAt) ? expiresAt : null;
-
-    if (!e) return { startedAt: s, expiresAt: e, daysLeft: null };
-    const msLeft = e - Date.now();
-    const daysLeft = Math.ceil(msLeft / (24 * 60 * 60 * 1000));
-    return { startedAt: s, expiresAt: e, daysLeft };
-  }
-
-  public static async startDemo(role: DemoRole): Promise<void> {
-    const now = Date.now();
-    const expiresAt = now + 30 * 24 * 60 * 60 * 1000;
-    localStorage.setItem(DemoService.KEY_MODE, '1');
-    localStorage.setItem(DemoService.KEY_ROLE, role);
-    if (!localStorage.getItem(DemoService.KEY_STARTED_AT)) {
-      localStorage.setItem(DemoService.KEY_STARTED_AT, String(now));
-      localStorage.setItem(DemoService.KEY_EXPIRES_AT, String(expiresAt));
+  static ensureDemoLifecycle(role: DemoRole) {
+    const now = new Date();
+    const existingStarted = localStorage.getItem(LS.startedAt);
+    const existingExpires = localStorage.getItem(LS.expiresAt);
+    if (!existingStarted || !existingExpires) {
+      const startedAt = now.toISOString();
+      const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      localStorage.setItem(LS.startedAt, startedAt);
+      localStorage.setItem(LS.expiresAt, expiresAt);
     }
-    // ensure sync is disabled by default
-    if (!localStorage.getItem(DemoService.KEY_SYNC_ENABLED)) {
-      localStorage.setItem(DemoService.KEY_SYNC_ENABLED, '0');
-    }
-
-    // Seed demo data once
-    await DemoService.seedDemoDataIfNeeded(role);
+    localStorage.setItem(LS.enabled, '1');
+    localStorage.setItem(LS.role, role);
   }
 
-  public static async requestSync(): Promise<{ ok: boolean; requestId?: string; error?: string }> {
+  static getInfo(): DemoInfo {
+    const enabled = DemoService.isDemo();
+    const role = DemoService.getDemoRole();
+    const startedAt = localStorage.getItem(LS.startedAt) || new Date().toISOString();
+    const expiresAt = localStorage.getItem(LS.expiresAt) || new Date().toISOString();
+    const now = new Date();
+    const exp = new Date(expiresAt);
+    const daysLeft = daysBetween(now, exp);
+    const isExpired = enabled && (exp.getTime() <= now.getTime());
+    const shouldWarn = enabled && !isExpired && daysLeft <= 5;
+    const syncRequested = !!DemoService.getSyncRequestId();
+    const syncEnabled = DemoService.isSyncEnabled();
+    return { enabled, role, startedAt, expiresAt, daysLeft: Math.max(0, daysLeft), shouldWarn, isExpired, syncRequested, syncEnabled };
+  }
+
+  static async wipeLocalDemoData() {
     try {
-      const deviceId = SettingsService.getDeviceId();
-      const demoRole = DemoService.getRole() || 'staff';
-      const payload = {
-        device_id: deviceId,
-        requested_at: new Date().toISOString(),
-        status: 'pending',
-        demo_role: demoRole
-      };
-      const { data, error } = await supabase
-        .from('demo_codes')
-        .insert([payload])
-        .select('id')
-        .single();
-
-      if (error) throw error;
-      if (!data?.id) throw new Error('Server did not return demo request id');
-      localStorage.setItem(DemoService.KEY_SYNC_REQUEST_ID, String(data.id));
-      return { ok: true, requestId: String(data.id) };
-    } catch (e: any) {
-      return { ok: false, error: e?.message || 'Request sync failed' };
+      await db.delete();
+    } catch (e) {
+      console.warn('[DEMO] db.delete failed', e);
     }
+
+    // clear demo flags
+    Object.values(LS).forEach((k) => localStorage.removeItem(k));
+  }
+
+  static async enforceExpiry(): Promise<{ expired: boolean }>{
+    const info = DemoService.getInfo();
+    if (info.enabled && info.isExpired) {
+      await DemoService.wipeLocalDemoData();
+      return { expired: true };
+    }
+    return { expired: false };
+  }
+
+  static async seedDemoTablesIfEmpty() {
+    if (!DemoService.isDemo()) return;
+    const count = await db.pos_tables.count();
+    if (count > 0) return;
+
+    // 12 tables laid out in a visible grid (percent-based coordinates)
+    const tables: any[] = [];
+    const cols = 4;
+    const rows = 3;
+    const startX = 14;
+    const startY = 16;
+    const gapX = 18;
+    const gapY = 20;
+    let idx = 1;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        tables.push({
+          id: `T${idx}`,
+          label: `Bàn ${idx}`,
+          status: 'Available',
+          shape: 'square',
+          x: startX + c * gapX,
+          y: startY + r * gapY,
+          width: 100,
+          height: 100,
+          seats: 4,
+        });
+        idx++;
+      }
+    }
+
+    // Takeaway table for ordering
+    tables.push({
+      id: 'Takeaway',
+      label: 'Takeaway',
+      status: 'Available',
+      shape: 'rectangle',
+      x: 78,
+      y: 78,
+      width: 130,
+      height: 90,
+      seats: 0,
+    });
+
+    await db.pos_tables.bulkAdd(tables);
+  }
+
+  static async startDemo(role: DemoRole) {
+    DemoService.ensureDemoLifecycle(role);
+    await DemoService.seedDemoTablesIfEmpty();
   }
 
   /**
-   * Unlock sync by code.
-   * Per requirement: "check đúng ID" => accept when code matches request id.
-   * (We also accept code matching request id ignoring case and spaces.)
+   * Send one request to server to register this device for sync.
+   * We store returned id locally, but we DO NOT display it in UI.
    */
-  public static async unlockSyncWithCode(inputCode: string): Promise<{ ok: boolean; error?: string }>
-  {
-    const requestId = DemoService.getSyncRequestId();
-    if (!requestId) return { ok: false, error: 'Chưa có ID yêu cầu. Hãy bấm “YÊU CẦU ĐỒNG BỘ” trước.' };
-
-    const code = (inputCode || '').trim();
-    if (!code) return { ok: false, error: 'Vui lòng nhập mã.' };
-
-    // exact match to requestId
-    if (code === requestId) {
-      localStorage.setItem(DemoService.KEY_SYNC_ENABLED, '1');
-      localStorage.setItem(DemoService.KEY_SYNC_UNLOCKED_AT, new Date().toISOString());
-      return { ok: true };
+  static async requestSyncOnce(): Promise<{ ok: boolean; message?: string }>{
+    if (DemoService.getSyncRequestId()) {
+      return { ok: true, message: 'Đã gửi yêu cầu trước đó.' };
     }
+    if (!navigator.onLine) return { ok: false, message: 'Đang offline, không thể gửi yêu cầu.' };
 
-    // Allow a server-issued sync_code if you later decide to use it.
+    const deviceId = SettingsService.getDeviceId();
     try {
-      const deviceId = SettingsService.getDeviceId();
       const { data, error } = await supabase
         .from('demo_codes')
-        .select('id, status, expired_at, sync_code, device_id')
-        .eq('device_id', deviceId)
-        .eq('sync_code', code)
-        .maybeSingle();
-      if (!error && data) {
-        const expiredAt = data.expired_at ? new Date(data.expired_at).getTime() : null;
-        const okStatus = (data.status || '').toLowerCase() === 'approved' || (data.status || '').toLowerCase() === 'active';
-        const notExpired = !expiredAt || expiredAt > Date.now();
-        if (okStatus && notExpired) {
-          localStorage.setItem(DemoService.KEY_SYNC_ENABLED, '1');
-          localStorage.setItem(DemoService.KEY_SYNC_UNLOCKED_AT, new Date().toISOString());
-          return { ok: true };
-        }
-      }
-    } catch {
-      // ignore
+        .insert([{ device_id: deviceId, status: 'pending', requested_at: new Date().toISOString() }])
+        .select('id')
+        .single();
+      if (error) throw error;
+      if (!data?.id) return { ok: false, message: 'Không nhận được ID từ server.' };
+      localStorage.setItem(LS.syncRequestId, String(data.id));
+      return { ok: true };
+    } catch (e: any) {
+      console.error('[DEMO] requestSyncOnce error', e);
+      return { ok: false, message: e?.message || 'Gửi yêu cầu thất bại.' };
     }
-
-    return { ok: false, error: 'Mã không đúng (hoặc chưa được duyệt).' };
   }
 
-  public static async enforceLifecycle(): Promise<{ wiped: boolean; reason?: string }>
-  {
-    if (!DemoService.isDemo()) return { wiped: false };
-    const { expiresAt, daysLeft } = DemoService.getLifecycle();
-    if (!expiresAt) return { wiped: false };
-    if ((daysLeft ?? 0) > 0) return { wiped: false };
-
-    // Expired: wipe local demo data
-    await DemoService.wipeAllDemoData();
-    return { wiped: true, reason: 'EXPIRED' };
-  }
-
-  public static async wipeAllDemoData(): Promise<void> {
-    try {
-      await db.delete();
-      await db.open();
-    } catch {
-      // ignore
-    }
-    // remove demo flags
-    [
-      DemoService.KEY_MODE,
-      DemoService.KEY_ROLE,
-      DemoService.KEY_STARTED_AT,
-      DemoService.KEY_EXPIRES_AT,
-      DemoService.KEY_SYNC_ENABLED,
-      DemoService.KEY_SYNC_REQUEST_ID,
-      DemoService.KEY_SYNC_UNLOCKED_AT,
-      DemoService.KEY_SEEDED
-    ].forEach(k => localStorage.removeItem(k));
-  }
-
-  private static async seedDemoDataIfNeeded(role: DemoRole): Promise<void> {
-    if (localStorage.getItem(DemoService.KEY_SEEDED) === '1') return;
-
-    // If existing data, do not overwrite
-    const hasMenu = (await db.menu_items.count()) > 0;
-    const hasTables = (await db.pos_tables.count()) > 0;
-    if (hasMenu || hasTables) {
-      localStorage.setItem(DemoService.KEY_SEEDED, '1');
-      return;
-    }
-
-    const now = new Date().toISOString();
-    const tables = [
-      { id: 'T1', label: 'Bàn 1', x: 60, y: 60, width: 120, height: 90, shape: 'rect', seats: 4, status: 'Available', created_at: now, updated_at: now },
-      { id: 'T2', label: 'Bàn 2', x: 220, y: 60, width: 120, height: 90, shape: 'rect', seats: 4, status: 'Available', created_at: now, updated_at: now },
-      { id: 'T3', label: 'Bàn 3', x: 60, y: 170, width: 120, height: 90, shape: 'rect', seats: 6, status: 'Available', created_at: now, updated_at: now },
-    ];
-
-    // menu_items: server schema uses integer id when synced, but locally supports string id.
-    const uid = () => self.crypto.randomUUID();
-    const menu = [
-      { id: `LOCAL_${uid()}`, uid: uid(), name: 'Cà phê sữa', price: 29000, category: 'Đồ uống', unit: 'ly', created_at: now, updated_at: now, sync_status: 'local' },
-      { id: `LOCAL_${uid()}`, uid: uid(), name: 'Trà đào', price: 39000, category: 'Đồ uống', unit: 'ly', created_at: now, updated_at: now, sync_status: 'local' },
-      { id: `LOCAL_${uid()}`, uid: uid(), name: 'Bánh mì ốp la', price: 35000, category: 'Ăn nhanh', unit: 'phần', created_at: now, updated_at: now, sync_status: 'local' },
-      { id: `LOCAL_${uid()}`, uid: uid(), name: 'Phở bò', price: 55000, category: 'Món chính', unit: 'tô', created_at: now, updated_at: now, sync_status: 'local' },
-    ];
-
-    await db.transaction('rw', [db.pos_tables, db.menu_items], async () => {
-      await db.pos_tables.bulkPut(tables as any);
-      await db.menu_items.bulkPut(menu as any);
-    });
-
-    // Slight role-based tweak: staff sees simpler UI by default
-    if (role === 'staff') {
-      try {
-        // quickOrder is a nice demo default
-        await db.settings.put({ key: 'quickOrder', value: true } as any);
-      } catch {
-        // ignore
-      }
-    }
-
-    localStorage.setItem(DemoService.KEY_SEEDED, '1');
+  static enableSyncWithId(inputId: string): { ok: boolean; message?: string } {
+    const code = (inputId || '').trim();
+    if (!code) return { ok: false, message: 'Vui lòng nhập ID.' };
+    const expected = DemoService.getSyncRequestId();
+    if (!expected) return { ok: false, message: 'Chưa có yêu cầu đồng bộ. Vui lòng bấm “YÊU CẦU ĐỒNG BỘ” trước.' };
+    if (code !== expected) return { ok: false, message: 'ID không đúng. Vui lòng kiểm tra lại.' };
+    localStorage.setItem(LS.syncEnabled, '1');
+    return { ok: true };
   }
 }

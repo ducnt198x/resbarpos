@@ -6,7 +6,7 @@ import {
   ArrowLeft, Search, AlertTriangle, FileText, Copy, 
   UserCog, Shield, Undo2, Wifi, WifiOff, RefreshCw, ShieldAlert, Keyboard,
   CheckCircle2, Plus, ChevronLeft, LayoutTemplate, Terminal, Info, CreditCard,
-  Edit, Sparkles, Timer, KeyRound
+  Edit
 } from 'lucide-react';
 import { useSettingsLogic, SaveStatus } from '../hooks/useSettingsLogic';
 import { supabase } from '../supabase';
@@ -14,7 +14,6 @@ import { useTheme } from '../ThemeContext';
 import { SETTINGS_PRESETS, useSettingsContext } from '../context/SettingsContext';
 import { SettingCardConfig, SettingSectionConfig, SettingItemConfig, SettingOption } from '../types/settingsTypes';
 import { useAuth } from '../AuthContext';
-import { DemoService } from '../services/DemoService';
 
 // --- TYPES RE-EXPORT ---
 export type { SettingControlType, SettingOption, SettingItemConfig, SettingSectionConfig, SettingCardConfig } from '../types/settingsTypes';
@@ -580,7 +579,7 @@ const PasswordModal = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => vo
 
 export const Settings: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   const { t } = useTheme();
-  const { role, lockApp, signOut, isDemo } = useAuth();
+  const { role, lockApp, signOut } = useAuth();
   
   const { 
     state: { settings }, 
@@ -606,31 +605,7 @@ export const Settings: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
   const [dangerModal, setDangerModal] = useState<any>({ open: false });
   const [showPwModal, setShowPwModal] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
-
-  // --- DEMO / TRIAL UI STATE ---
-  const [demoSyncCode, setDemoSyncCode] = useState('');
-  const [demoSyncBusy, setDemoSyncBusy] = useState(false);
-  const [demoBannerTick, setDemoBannerTick] = useState(0);
-
-  useEffect(() => {
-    if (!isDemo) return;
-    // keep countdown fresh
-    const iv = setInterval(() => setDemoBannerTick(t => t + 1), 60 * 1000);
-    return () => clearInterval(iv);
-  }, [isDemo]);
-
-
-
-  // Demo derived values (refresh via demoBannerTick)
-  const demoInfo = useMemo(() => {
-    if (!isDemo) return null;
-    void demoBannerTick; // dependency marker
-    return {
-      ...DemoService.getLifecycle(),
-      syncEnabled: DemoService.isSyncEnabled(),
-      requestId: DemoService.getSyncRequestId()
-    };
-  }, [isDemo, demoBannerTick]);
+  const [demoSyncIdInput, setDemoSyncIdInput] = useState('');
 
   const handleValueChange = (key: string, value: any) => {
       bulkSet({ [key]: value, presetId: '' });
@@ -889,7 +864,14 @@ export const Settings: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
           title: 'Offline & Đồng bộ',
           items: [
             { id: 'autoSync', label: 'Tự động đồng bộ', subtitle: 'Tự đẩy dữ liệu lên server khi có mạng', type: 'toggle', valueKey: 'autoSync' },
-            { id: 'syncNow', label: combinedValues.networkStatusLabel === 'Offline' ? t('Đang Offline') : t('Đồng bộ ngay'), subtitle: 'Đẩy thủ công các đơn Offline lên hệ thống', type: 'button', actionId: 'sync_now', disabled: combinedValues.networkStatusLabel === 'Offline' },
+            { 
+              id: 'syncNow', 
+              label: combinedValues.networkStatusLabel === 'Offline' ? t('Đang Offline') : t('Đồng bộ ngay'), 
+              subtitle: (combinedValues.demoEnabled && !combinedValues.demoSyncEnabled) ? 'Bản demo: cần ID đồng bộ để mở' : 'Đẩy thủ công các đơn Offline lên hệ thống', 
+              type: 'button', 
+              actionId: 'sync_now', 
+              disabled: combinedValues.networkStatusLabel === 'Offline' || (combinedValues.demoEnabled && !combinedValues.demoSyncEnabled) 
+            },
             { id: 'networkStatusLabel', label: 'Trạng thái mạng', type: 'info', valueKey: 'networkStatusLabel' },
             { id: 'pendingSyncCount', label: 'Đơn chờ đồng bộ', type: 'info', valueKey: 'pendingSyncCount' },
             { id: 'lastSyncTime', label: 'Lần đồng bộ cuối', type: 'info', valueKey: 'lastSyncTimeDisplay' },
@@ -899,29 +881,21 @@ export const Settings: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         {
           title: 'Sao lưu',
           items: [
-            {
-              id: 'exportData',
-              label: 'Xuất dữ liệu',
-              subtitle: !isAdmin
-                ? 'Chỉ Admin'
-                : (demoInfo && !demoInfo.syncEnabled)
-                  ? 'Bản demo: cần ID đồng bộ để mở'
-                  : 'Tải về file dự phòng (JSON)',
-              type: 'button',
-              actionId: 'export_data',
-              disabled: !isAdmin || (demoInfo && !demoInfo.syncEnabled)
+            { 
+              id: 'exportData', 
+              label: 'Xuất dữ liệu', 
+              subtitle: (!isAdmin ? 'Chỉ Admin' : (combinedValues.demoEnabled && !combinedValues.demoSyncEnabled ? 'Bản demo: cần ID đồng bộ để mở' : 'Tải về file dự phòng (JSON)')),
+              type: 'button', 
+              actionId: 'export_data', 
+              disabled: !isAdmin || (combinedValues.demoEnabled && !combinedValues.demoSyncEnabled) 
             },
-            {
-              id: 'importData',
-              label: 'Nhập dữ liệu',
-              subtitle: !isAdmin
-                ? 'Chỉ Admin'
-                : (demoInfo && !demoInfo.syncEnabled)
-                  ? 'Bản demo: cần ID đồng bộ để mở'
-                  : 'Khôi phục từ file backup',
-              type: 'button',
-              actionId: 'import_data',
-              disabled: !isAdmin || (demoInfo && !demoInfo.syncEnabled)
+            { 
+              id: 'importData', 
+              label: 'Nhập dữ liệu', 
+              subtitle: (!isAdmin ? 'Chỉ Admin' : (combinedValues.demoEnabled && !combinedValues.demoSyncEnabled ? 'Bản demo: cần ID đồng bộ để mở' : 'Khôi phục từ file backup')),
+              type: 'button', 
+              actionId: 'import_data', 
+              disabled: !isAdmin || (combinedValues.demoEnabled && !combinedValues.demoSyncEnabled) 
             },
           ]
         },
@@ -934,7 +908,7 @@ export const Settings: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
         }
       ]
     }
-  }}, [settings, role, t, combinedValues, demoInfo]);
+  }}, [settings, role, t, combinedValues]);
 
   const wrapAction = async (id: string) => {
     if (id === 'view_shortcuts') setShowShortcuts(true);
@@ -953,6 +927,7 @@ export const Settings: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
     if (role === 'manager') return [VIEW_CONFIGS.ui, VIEW_CONFIGS.printing, VIEW_CONFIGS.system];
     return [VIEW_CONFIGS.ui];
   }, [role, VIEW_CONFIGS]);
+
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-background relative">
       {notification && (
@@ -998,106 +973,63 @@ export const Settings: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
               </div>
             </div>
 
-            {demoInfo && (
-              <div className="mb-8 rounded-2xl border border-border bg-surface p-5 relative overflow-hidden">
-                <div className="absolute -right-10 -top-10 w-40 h-40 rounded-full bg-primary/10 blur-2xl" />
-                <div className="relative flex flex-col lg:flex-row lg:items-center gap-4 justify-between">
+            {/* DEMO/TRIAL banner */}
+            {combinedValues.demoEnabled && (
+              <div className="mb-6 p-4 rounded-2xl border border-border bg-surface shadow-sm">
+                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                   <div className="flex items-start gap-3">
-                    <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
-                      <Sparkles size={18} />
+                    <div className="size-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                      <Shield size={18} />
                     </div>
                     <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-sm font-black text-text-main">Bản Trial / Demo (Full tính năng)</h3>
-                        <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${demoInfo.syncEnabled ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' : 'bg-amber-500/10 text-amber-600 border-amber-500/20'}`}>
-                          {demoInfo.syncEnabled ? 'Đã mở đồng bộ' : 'Offline-only'}
-                        </span>
+                      <div className="font-black text-text-main">Bản Trial / Demo (Full tính năng)</div>
+                      <div className="text-xs font-bold text-secondary mt-1">
+                        Còn <span className="text-text-main">{combinedValues.demoDaysLeft}</span> ngày. 
+                        {combinedValues.demoShouldWarn ? ' Dữ liệu sẽ tự xoá khi hết hạn.' : ''}
                       </div>
-                      <p className="text-xs text-secondary mt-1 leading-relaxed">
-                        {demoInfo.daysLeft !== null && demoInfo.daysLeft <= 5 ? (
-                          <>
-                            <span className="font-black text-amber-600">Còn {demoInfo.daysLeft} ngày</span> — dữ liệu demo sẽ tự động xoá sau khi hết hạn (30 ngày).
-                          </>
-                        ) : (
-                          <>Trải nghiệm mượt như bản thật. Dữ liệu được lưu cục bộ và sẽ tự xoá sau 30 ngày nếu không can thiệp.</>
-                        )}
-                      </p>
-                      {!demoInfo.syncEnabled && (
-                        <p className="text-[11px] text-secondary mt-1">
-                          Gợi ý: bấm <span className="font-black text-text-main">“YÊU CẦU ĐỒNG BỘ”</span> để gửi yêu cầu. Sau đó liên hệ <span className="font-black text-text-main">Đức Ngô</span> để nhận <span className="font-black text-text-main">ID đồng bộ</span>, rồi nhập ID để mở đồng bộ và mở Xuất/Nhập.
-                        </p>
+                      {combinedValues.demoShouldWarn && (
+                        <div className="mt-2 text-xs font-bold text-amber-600 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl inline-flex items-center gap-2">
+                          <AlertTriangle size={16} /> Còn 5 ngày: dữ liệu sẽ tự xoá sau khi hết trial.
+                        </div>
                       )}
                     </div>
                   </div>
 
                   <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
-                    {!demoInfo.syncEnabled && (
+                    {!combinedValues.demoSyncEnabled && !combinedValues.demoSyncRequested && (
                       <button
-                        disabled={demoSyncBusy}
-                        onClick={async () => {
-                          setDemoSyncBusy(true);
-                          try {
-                            const res = await DemoService.requestSync();
-                            if (!res.ok) {
-                              setNotification({ type: 'error', msg: `Không thể yêu cầu đồng bộ: ${res.error || 'Unknown error'}` });
-                            } else {
-                              setNotification({ type: 'success', msg: 'Đã gửi yêu cầu đồng bộ. Vui lòng liên hệ Đức Ngô để nhận ID.' });
-                            }
-                          } finally {
-                            setDemoSyncBusy(false);
-                            setDemoBannerTick(t => t + 1);
-                          }
-                        }}
-                        className="px-4 py-2 rounded-xl bg-primary text-background font-black text-sm hover:bg-primary-hover transition-all shadow-lg shadow-primary/20 disabled:opacity-60 disabled:cursor-not-allowed flex items-center gap-2"
+                        onClick={() => handleAction('request_demo_sync')}
+                        className="px-4 py-2 rounded-xl font-black bg-primary text-background hover:bg-primary-hover transition-colors"
                       >
-                        {demoSyncBusy ? <Loader2 size={16} className="animate-spin" /> : <Timer size={16} />}
                         YÊU CẦU ĐỒNG BỘ
                       </button>
                     )}
 
-                    {demoInfo.requestId && !demoInfo.syncEnabled && (
-                      <div className="flex items-center gap-2 bg-background border border-border rounded-xl px-3 py-2">
-                        <Info size={16} className="text-secondary" />
-                        <div className="text-xs text-secondary">
-                          Đã gửi yêu cầu. Liên hệ <span className="font-black text-text-main">Đức Ngô</span> để nhận ID.
+                    {!combinedValues.demoSyncEnabled && combinedValues.demoSyncRequested && (
+                      <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+                        <div className="text-xs font-bold text-secondary">
+                          Đã gửi yêu cầu. Liên hệ <strong className="text-text-main">Đức Ngô</strong> để nhận ID.
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            value={demoSyncIdInput}
+                            onChange={(e) => setDemoSyncIdInput(e.target.value)}
+                            placeholder="Nhập ID đồng bộ"
+                            className="w-44 px-3 py-2 rounded-xl bg-background border border-border text-sm font-bold text-text-main placeholder-secondary/50 focus:outline-none focus:ring-2 focus:ring-primary/30"
+                          />
+                          <button
+                            onClick={() => handleAction('enable_demo_sync', { id: demoSyncIdInput })}
+                            className="px-4 py-2 rounded-xl font-black bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
+                          >
+                            ĐỒNG BỘ
+                          </button>
                         </div>
                       </div>
                     )}
 
-                    {!demoInfo.syncEnabled && (
-                      <div className="flex items-center gap-2 bg-background border border-border rounded-xl px-3 py-2">
-                        <KeyRound size={16} className="text-secondary" />
-                        <input
-                          value={demoSyncCode}
-                          onChange={(e) => setDemoSyncCode(e.target.value)}
-                          placeholder="Nhập ID đồng bộ"
-                          className="bg-transparent outline-none text-sm text-text-main placeholder-secondary/50 w-[180px]"
-                        />
-                        <button
-                          disabled={demoSyncBusy}
-                          onClick={async () => {
-                            setDemoSyncBusy(true);
-                            try {
-                              const res = await DemoService.unlockSyncWithCode(demoSyncCode);
-                              if (!res.ok) {
-                                setNotification({ type: 'error', msg: res.error || 'ID không hợp lệ' });
-                              }
-                            } finally {
-                              setDemoSyncBusy(false);
-                              setDemoSyncCode('');
-                              setDemoBannerTick(t => t + 1);
-                            }
-                          }}
-                          className="px-3 py-1.5 rounded-lg bg-surface hover:bg-primary/10 text-text-main font-black text-xs border border-border hover:border-primary/20 transition-all disabled:opacity-60"
-                        >
-                          Đồng bộ
-                        </button>
-                      </div>
-                    )}
-
-                    {demoInfo.syncEnabled && (
-                      <div className="flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 font-black text-sm">
-                        <CheckCircle2 size={16} /> Đồng bộ đã bật
+                    {combinedValues.demoSyncEnabled && (
+                      <div className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 text-xs font-black inline-flex items-center gap-2">
+                        <CheckCircle2 size={16} /> Đã mở đồng bộ
                       </div>
                     )}
                   </div>
