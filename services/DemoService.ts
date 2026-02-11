@@ -88,7 +88,7 @@ export class DemoService {
     Object.values(LS).forEach((k) => localStorage.removeItem(k));
   }
 
-  static async enforceExpiry(): Promise<{ expired: boolean }>{
+  static async enforceExpiry(): Promise<{ expired: boolean }> {
     const info = DemoService.getInfo();
     if (info.enabled && info.isExpired) {
       await DemoService.wipeLocalDemoData();
@@ -144,16 +144,77 @@ export class DemoService {
     await db.pos_tables.bulkAdd(tables);
   }
 
+  static async seedDemoMenuIfEmpty() {
+    if (!DemoService.isDemo()) return;
+    const count = await db.menu_items.count();
+    if (count > 0) return;
+
+    const mk = (i: number, item: any) => ({
+      id: `DEMO_${i}`,
+      uid: crypto.randomUUID(),
+      sync_status: 'local',
+      stock: 999,
+      description: '',
+      image: '',
+      ...item,
+    });
+
+    // A ready-to-test demo menu (full features, easy to scan)
+    const items: any[] = [
+      // Coffee
+      mk(1, { category: 'Coffee', name: 'Cà phê đen đá', price: 22000, image_url: 'https://images.unsplash.com/photo-1510707577719-ae7c14805e3a' }),
+      mk(2, { category: 'Coffee', name: 'Cà phê sữa đá', price: 28000 }),
+      mk(3, { category: 'Coffee', name: 'Bạc xỉu', price: 30000 }),
+      mk(4, { category: 'Coffee', name: 'Americano', price: 35000 }),
+      mk(5, { category: 'Coffee', name: 'Latte', price: 45000 }),
+      mk(6, { category: 'Coffee', name: 'Cappuccino', price: 45000 }),
+      mk(7, { category: 'Coffee', name: 'Mocha', price: 49000 }),
+
+      // Tea
+      mk(11, { category: 'Tea', name: 'Trà đào cam sả', price: 42000 }),
+      mk(12, { category: 'Tea', name: 'Trà tắc mật ong', price: 38000 }),
+      mk(13, { category: 'Tea', name: 'Trà vải', price: 42000 }),
+      mk(14, { category: 'Tea', name: 'Trà xanh macchiato', price: 52000 }),
+
+      // Juice & Soda
+      mk(21, { category: 'Juice', name: 'Nước cam', price: 45000 }),
+      mk(22, { category: 'Juice', name: 'Nước ép thơm', price: 42000 }),
+      mk(23, { category: 'Juice', name: 'Chanh dây', price: 42000 }),
+      mk(24, { category: 'Soda', name: 'Soda chanh', price: 38000 }),
+      mk(25, { category: 'Soda', name: 'Soda dâu', price: 42000 }),
+
+      // Food
+      mk(31, { category: 'Food', name: 'Bánh mì chảo', price: 59000 }),
+      mk(32, { category: 'Food', name: 'Mì xào bò', price: 65000 }),
+      mk(33, { category: 'Food', name: 'Cơm gà xối mỡ', price: 69000 }),
+      mk(34, { category: 'Food', name: 'Salad cá ngừ', price: 59000 }),
+      mk(35, { category: 'Food', name: 'Khoai tây chiên', price: 39000 }),
+
+      // Dessert
+      mk(41, { category: 'Dessert', name: 'Bánh tiramisu', price: 49000 }),
+      mk(42, { category: 'Dessert', name: 'Bánh cheese cake', price: 52000 }),
+      mk(43, { category: 'Dessert', name: 'Pudding trứng', price: 32000 }),
+
+      // Other
+      mk(51, { category: 'Other', name: 'Nước suối', price: 15000 }),
+      mk(52, { category: 'Other', name: 'Coca-Cola', price: 20000 }),
+      mk(53, { category: 'Other', name: 'Sprite', price: 20000 }),
+    ];
+
+    await db.menu_items.bulkAdd(items);
+  }
+
   static async startDemo(role: DemoRole) {
     DemoService.ensureDemoLifecycle(role);
     await DemoService.seedDemoTablesIfEmpty();
+    await DemoService.seedDemoMenuIfEmpty();
   }
 
   /**
    * Send one request to server to register this device for sync.
    * We store returned id locally, but we DO NOT display it in UI.
    */
-  static async requestSyncOnce(): Promise<{ ok: boolean; message?: string }>{
+  static async requestSyncOnce(): Promise<{ ok: boolean; message?: string }> {
     if (DemoService.getSyncRequestId()) {
       return { ok: true, message: 'Đã gửi yêu cầu trước đó.' };
     }
