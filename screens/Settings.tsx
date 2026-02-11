@@ -884,18 +884,18 @@ export const Settings: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             { 
               id: 'exportData', 
               label: 'Xuất dữ liệu', 
-              subtitle: (!isAdmin ? 'Chỉ Admin' : (combinedValues.demoEnabled && !combinedValues.demoSyncEnabled ? 'Bản demo: cần ID đồng bộ để mở' : 'Tải về file dự phòng (JSON)')),
+              subtitle: (!isAdmin ? 'Chỉ Admin' : 'Tải về file dự phòng (JSON)'),
               type: 'button', 
               actionId: 'export_data', 
-              disabled: !isAdmin || (combinedValues.demoEnabled && !combinedValues.demoSyncEnabled) 
+              disabled: !isAdmin 
             },
             { 
               id: 'importData', 
               label: 'Nhập dữ liệu', 
-              subtitle: (!isAdmin ? 'Chỉ Admin' : (combinedValues.demoEnabled && !combinedValues.demoSyncEnabled ? 'Bản demo: cần ID đồng bộ để mở' : 'Khôi phục từ file backup')),
+              subtitle: (!isAdmin ? 'Chỉ Admin' : 'Khôi phục từ file backup'),
               type: 'button', 
               actionId: 'import_data', 
-              disabled: !isAdmin || (combinedValues.demoEnabled && !combinedValues.demoSyncEnabled) 
+              disabled: !isAdmin 
             },
           ]
         },

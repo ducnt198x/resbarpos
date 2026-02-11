@@ -132,10 +132,11 @@ export const useSettingsLogic = () => {
 
   const handleAction = async (actionId: string, payload?: any) => {
     const demoInfo = DemoService.getInfo();
-    // Demo/trial: block sync + import/export until unlocked
+    // Demo/trial: chỉ chặn ĐỒNG BỘ (sync) cho đến khi được cấp/mở ID.
+    // Import/Export dữ liệu vẫn cho phép (theo yêu cầu).
     if (demoInfo.enabled && !demoInfo.syncEnabled) {
-      if (actionId === 'export_data' || actionId === 'import_data' || actionId === 'sync_now') {
-        showToast('Bản demo: cần ID đồng bộ để mở chức năng này.', 'warning');
+      if (actionId === 'sync_now') {
+        showToast('Bản demo: cần ID đồng bộ để mở chức năng đồng bộ.', 'warning');
         return;
       }
     }
