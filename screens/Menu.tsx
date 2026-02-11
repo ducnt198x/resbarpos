@@ -37,8 +37,7 @@ const fileToBase64 = (file: File): Promise<string> => {
   });
 };
 
-// Subcomponent for Active Orders List
-const ActiveOrdersContent: React.FC<{
+interface ActiveOrdersContentProps {
   activeOrders: any[];
   tables: any[];
   onSelect: (order: any) => void;
@@ -46,44 +45,10 @@ const ActiveOrdersContent: React.FC<{
   formatPrice: (p: number) => string;
   viewingOrderId: string | null;
   onRequestCancel: (order: any) => void;
-}> = ({ activeOrders, tables, onSelect, t, formatPrice, viewingOrderId, onRequestCancel }) => {
-  // Resize State for Switch List (Mode B)
-  const [listHeight, setListHeight] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem("RESBAR_SWITCHLIST_HEIGHT");
-      return saved ? parseInt(saved, 10) : 120; // Changed default from 180 to 120
-    }
-    return 120;
-  });
+}
 
-  // Pointer Capture Refs
-  const isDragging = useRef(false);
-  const startY = useRef(0);
-  const startHeight = useRef(0);
-
-  const handlePointerDown = (e: React.PointerEvent) => {
-    isDragging.current = true;
-    startY.current = e.clientY;
-    startHeight.current = listHeight;
-    e.currentTarget.setPointerCapture(e.pointerId);
-  };
-
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging.current) return;
-    const delta = e.clientY - startY.current;
-    // Bounds: Min 80px (was 160), Max ~600px
-    const newHeight = Math.min(Math.max(80, startHeight.current + delta), 600);
-    setListHeight(newHeight);
-  };
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    if (isDragging.current) {
-      isDragging.current = false;
-      e.currentTarget.releasePointerCapture(e.pointerId);
-      localStorage.setItem("RESBAR_SWITCHLIST_HEIGHT", listHeight.toString());
-    }
-  };
-
+// Subcomponent for Active Orders List
+const ActiveOrdersContent = ({ activeOrders, tables, onSelect, t, formatPrice, viewingOrderId, onRequestCancel }: ActiveOrdersContentProps) => {
   if (activeOrders.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center py-10 opacity-30 gap-3">
@@ -125,13 +90,13 @@ const ActiveOrdersContent: React.FC<{
           </div>
 
           <div className="flex items-center gap-2">
-            {isSelected && isActive && (
+            {isActive && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   onRequestCancel(order);
                 }}
-                className="p-1.5 rounded-lg bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white transition-all animate-in fade-in zoom-in duration-200"
+                className="opacity-0 group-hover:opacity-100 p-1 text-secondary hover:text-red-500 hover:bg-red-500/10 rounded transition-all"
                 title={t('Cancel Order')}
               >
                 <Trash2 size={14} />
@@ -151,36 +116,9 @@ const ActiveOrdersContent: React.FC<{
     );
   };
 
-  // MODE A: Standard List (No internal scroll)
-  if (!viewingOrderId) {
-    return (
-      <div className="space-y-2">
-        {activeOrders.map(renderItem)}
-      </div>
-    );
-  }
-
-  // MODE B: Switch View (Resizable Scroll Container)
   return (
-    <div className="flex flex-col">
-      <div
-        className="space-y-2 overflow-y-auto custom-scrollbar pr-1"
-        style={{ height: listHeight }}
-      >
-        {activeOrders.map(renderItem)}
-      </div>
-
-      {/* Drag Handle */}
-      <div
-        className="h-5 flex items-center justify-center cursor-ns-resize touch-none hover:bg-border/50 active:bg-border transition-colors rounded-b-lg -mb-1 mt-1"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        title="Drag to resize"
-      >
-        <div className="w-10 h-1 rounded-full bg-secondary/30"></div>
-      </div>
+    <div className="space-y-2">
+      {activeOrders.map(renderItem)}
     </div>
   );
 };
@@ -254,14 +192,17 @@ export const Menu: React.FC = () => {
 
   // Custom Dropdown State for Category
   const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState(false);
+  const [customCategory, setCustomCategory] = useState('');
 
   const [itemForm, setItemForm] = useState({
-    name: '', price: '', category: 'Coffee', image: '', stock: '99', description: ''
+    name: '', price: '', category: '', image: '', stock: '99', description: ''
   });
 
   // Delete Confirmation State
   const [pendingDelete, setPendingDelete] = useState<MenuItem | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showDeleteCategoryModal, setShowDeleteCategoryModal] = useState(false);
+  const [categoryToDelete, setCategoryToDelete] = useState<string | null>(null);
 
   // Image Upload State
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -301,11 +242,28 @@ export const Menu: React.FC = () => {
   }, [orders]);
 
   const uniqueCategories = useMemo(() => {
-    const defaults = ['Coffee', 'Non Coffee', 'Matcha', 'Food'];
-    const existing = Array.from(new Set((items || []).map(i => i.category))).filter(Boolean);
-    // Combine and deduplicate
-    return Array.from(new Set([...defaults, ...existing])).sort();
+    // Get all unique categories from existing menu items, sorted alphabetically
+    const existing = Array.from(new Set((items || []).map(i => i.category).filter(Boolean)));
+    return existing.sort();
   }, [items]);
+
+  // Helper to get default category for new items
+  const getDefaultCategory = () => {
+    return uniqueCategories.length > 0 ? uniqueCategories[0] : 'Uncategorized';
+  };
+
+  // Auto-set default category when categories are loaded
+  useEffect(() => {
+    if (!itemForm.category && uniqueCategories.length > 0) {
+      setItemForm(prev => ({ ...prev, category: getDefaultCategory() }));
+    }
+  }, [uniqueCategories]);
+
+  // Categories for Form Dropdown (Filter out 'All' if it exists, though uniqueCategories logic handles raw data)
+  const formCategories = useMemo(() => {
+    // Filter "All" out just in case, though usually not in items' category field
+    return uniqueCategories.filter(c => c !== 'All');
+  }, [uniqueCategories]);
 
   const availableTables = useMemo(() => {
     return tables.filter(table => {
@@ -346,12 +304,35 @@ export const Menu: React.FC = () => {
       const next = [...base];
 
       if (idx > -1) {
-        next[idx] = { ...next[idx], quantity: (next[idx].quantity || 0) + qty };
-      } else {
+        const newQty = (next[idx].quantity || 0) + qty;
+        if (newQty <= 0) {
+          // RESET FLOW: If this is the last item, remove => reset table
+          if (next.length <= 1) {
+            performCancelOrder(viewingOrder, () => {
+              setViewingOrder(null);
+              setModifiedItems(null);
+            }, {
+              confirm: {
+                title: t('Confirm Reset Order'),
+                message: t('Last item removal warning'),
+                confirmText: t('Confirm'),
+                isDanger: true
+              },
+              successMessage: t('Table Reset Success'),
+              details: 'Auto-reset via grid decrement'
+            });
+            return;
+          }
+          next.splice(idx, 1);
+        } else {
+          next[idx] = { ...next[idx], quantity: newQty };
+        }
+      } else if (qty > 0) {
         next.push({
           menu_item_id: item.id,
           quantity: qty,
           price: item.price,
+          snapshot_name: item.name,
           _display_name: item.name,
           _display_price: item.price,
           note: ''
@@ -427,12 +408,23 @@ export const Menu: React.FC = () => {
       // Use image from form directly (it holds either Base64 or URL)
       const imageUrl = itemForm.image;
 
+      // Handle New Category Logic
+      let finalCategory = itemForm.category;
+      if (finalCategory === '__NEW__') {
+        finalCategory = customCategory.trim();
+        if (!finalCategory) {
+          showToast(t('Vui lòng nhập tên danh mục mới'), 'error');
+          setIsUploading(false);
+          return;
+        }
+      }
+
       const data = {
         ...itemForm,
+        category: finalCategory, // Use processed category
         image: imageUrl,
         price: Number(itemForm.price),
-        stock: Number(itemForm.stock),
-        category: itemForm.category.trim() || 'Other' // Ensure category is saved
+        stock: Number(itemForm.stock)
       };
 
       if (editingItem) {
@@ -467,6 +459,48 @@ export const Menu: React.FC = () => {
     }
   };
 
+  const handleDeleteCategory = async () => {
+    if (!categoryToDelete || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      // Tìm tất cả items trong danh mục này
+      const itemsInCategory = items.filter(item => item.category === categoryToDelete);
+
+      if (itemsInCategory.length === 0) {
+        showToast(t('Không có món nào trong danh mục này'), 'info');
+        setShowDeleteCategoryModal(false);
+        setCategoryToDelete(null);
+        setIsDeleting(false);
+        return;
+      }
+
+      // Cập nhật tất cả items sang danh mục "Uncategorized"
+      for (const item of itemsInCategory) {
+        await updateMenuItem(item.id, { ...item, category: 'Uncategorized' });
+      }
+
+      showToast(t('Đã xóa danh mục và chuyển các món sang Uncategorized'), 'success');
+
+      // Nếu đang edit item trong category này, reset form category
+      if (itemForm.category === categoryToDelete) {
+        setItemForm(prev => ({ ...prev, category: getDefaultCategory() }));
+      }
+
+      // Reset filter nếu đang filter category này
+      if (categoryFilter === categoryToDelete) {
+        setCategoryFilter('All');
+      }
+
+      setShowDeleteCategoryModal(false);
+      setCategoryToDelete(null);
+    } catch (e) {
+      console.error(e);
+      showToast(t('Lỗi khi xóa danh mục'), 'error');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   const updateCartQty = (idx: number, delta: number) => {
     setCart(prev => {
       const next = [...prev];
@@ -487,6 +521,24 @@ export const Menu: React.FC = () => {
     const newQty = (next[idx].quantity || 0) + delta;
 
     if (newQty <= 0) {
+      // RESET FLOW: If this is the last item, remove => reset table
+      if (next.length <= 1) {
+        performCancelOrder(viewingOrder, () => {
+          setViewingOrder(null);
+          setModifiedItems(null);
+        }, {
+          confirm: {
+            title: t('Confirm Reset Order'),
+            message: t('Last item removal warning'),
+            confirmText: t('Confirm'),
+            isDanger: true
+          },
+          successMessage: t('Table Reset Success'),
+          details: 'Auto-reset via sidebar removal'
+        });
+        return;
+      }
+
       // SECURITY GUARD: Item removal from active order
       const guardRes = await guardSensitive('cancel_item', () => {
         next.splice(idx, 1);
@@ -832,10 +884,10 @@ export const Menu: React.FC = () => {
               {isEditMode && isOnline && canEditMenu && (
                 <div
                   onClick={() => {
-                    setItemForm({ name: '', price: '', category: 'Coffee', image: '', stock: '99', description: '' });
+                    setItemForm({ name: '', price: '', category: getDefaultCategory(), image: '', stock: '99', description: '' });
                     setEditingItem(null);
                     setUploadPreview(null);
-                    setIsCategoryDropdownOpen(false);
+                    setCustomCategory('');
                     setIsItemModalOpen(true);
                   }}
                   className="group bg-surface border-2 border-dashed border-border rounded-2xl flex flex-col items-center justify-center gap-3 p-4 cursor-pointer hover:border-primary hover:bg-primary/5 transition-all aspect-[4/3] shadow-sm animate-in fade-in"
@@ -880,13 +932,13 @@ export const Menu: React.FC = () => {
                               setItemForm({
                                 name: item.name || '',
                                 price: (item.price ?? 0).toString(),
-                                category: item.category || 'Coffee',
+                                category: item.category || getDefaultCategory(),
                                 image: item.image || '',
                                 stock: (item.stock ?? 0).toString(),
                                 description: item.description || ''
                               });
                               setUploadPreview(item.image || null);
-                              setIsCategoryDropdownOpen(false);
+                              setCustomCategory('');
                               setIsItemModalOpen(true);
                             }}
                             className="p-2 bg-white text-black rounded-lg shadow-xl hover:scale-110 transition-transform"
@@ -1017,23 +1069,10 @@ export const Menu: React.FC = () => {
                         </div>
                       </div>
                       <span className={`text-[9px] font-black px-2 py-0.5 rounded-full border uppercase ${viewingOrder.status === 'Ready' ? 'bg-blue-500/10 text-blue-500 border-blue-500/20' :
-                          viewingOrder.status === 'Completed' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
-                            viewingOrder.status === 'Cancelled' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
-                              'bg-amber-500/10 text-amber-500 border-amber-500/10'
+                        viewingOrder.status === 'Completed' ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' :
+                          viewingOrder.status === 'Cancelled' ? 'bg-red-500/10 text-red-500 border-red-500/20' :
+                            'bg-amber-500/10 text-amber-500 border-amber-500/10'
                         }`}>{t(viewingOrder.status)}</span>
-                    </div>
-
-                    <div className="bg-surface/50 border border-border rounded-xl p-1">
-                      <p className="text-[10px] font-black text-secondary uppercase px-2 py-1">{t('Switch to')}</p>
-                      <ActiveOrdersContent
-                        activeOrders={activeOrders}
-                        tables={tables}
-                        onSelect={handleSelectActiveOrder}
-                        t={t}
-                        formatPrice={formatPrice}
-                        viewingOrderId={viewingOrder.id}
-                        onRequestCancel={handleRequestCancel}
-                      />
                     </div>
                   </div>
 
@@ -1257,66 +1296,41 @@ export const Menu: React.FC = () => {
                       <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-secondary">VND</span>
                     </div>
                   </div>
-                  <div className="space-y-1 relative">
+                  <div className="space-y-1">
                     <label className="text-xs font-bold text-secondary uppercase ml-1">{t('Category')}</label>
-                    <div className="relative">
-                      {/* --- CUSTOM COMBOBOX INPUT --- */}
-                      <input
-                        type="text"
-                        value={itemForm.category}
-                        onChange={e => {
-                          setItemForm({ ...itemForm, category: e.target.value });
-                          setIsCategoryDropdownOpen(true);
-                        }}
-                        onFocus={() => setIsCategoryDropdownOpen(true)}
-                        className="w-full bg-background border border-border rounded-xl pl-10 pr-10 py-3 font-bold text-text-main focus:ring-2 focus:ring-primary/50 outline-none transition-all"
-                        placeholder={t('Type or select...')}
-                      />
-                      <div className="absolute left-3 top-1/2 -translate-y-1/2 text-secondary pointer-events-none">
-                        <Tag size={16} />
-                      </div>
-                      <div
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-secondary cursor-pointer hover:text-primary transition-colors"
-                        onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
-                      >
-                        <ChevronDown size={16} className={`transition-transform duration-200 ${isCategoryDropdownOpen ? 'rotate-180' : ''}`} />
-                      </div>
-
-                      {/* --- CUSTOM DROPDOWN --- */}
-                      {isCategoryDropdownOpen && (
-                        <>
-                          {/* Backdrop to close dropdown */}
-                          <div className="fixed inset-0 z-10" onClick={() => setIsCategoryDropdownOpen(false)}></div>
-
-                          <div className="absolute top-full left-0 right-0 mt-2 bg-surface border border-border rounded-xl shadow-xl z-20 max-h-48 overflow-y-auto custom-scrollbar flex flex-col p-1 animate-in fade-in zoom-in-95 duration-100">
-                            {uniqueCategories.filter(c => c.toLowerCase().includes(itemForm.category.toLowerCase())).length > 0 ? (
-                              uniqueCategories
-                                .filter(c => c.toLowerCase().includes(itemForm.category.toLowerCase()))
-                                .map(cat => (
-                                  <button
-                                    key={cat}
-                                    onClick={() => {
-                                      setItemForm({ ...itemForm, category: cat });
-                                      setIsCategoryDropdownOpen(false);
-                                    }}
-                                    className="w-full text-left px-3 py-2.5 hover:bg-primary/10 hover:text-primary rounded-lg font-medium text-sm transition-colors flex items-center justify-between group"
-                                  >
-                                    {cat}
-                                    {itemForm.category === cat && <Check size={14} className="text-primary" />}
-                                  </button>
-                                ))
-                            ) : (
-                              <div className="px-3 py-3 text-center">
-                                <p className="text-xs text-secondary mb-1">Danh mục mới:</p>
-                                <span className="font-bold text-primary block truncate">"{itemForm.category}"</span>
-                              </div>
-                            )}
-                          </div>
-                        </>
+                    <div className="flex gap-2">
+                      <select value={itemForm.category} onChange={e => setItemForm({ ...itemForm, category: e.target.value })} className="flex-1 bg-background border border-border rounded-xl px-4 py-3 font-bold text-text-main focus:ring-2 focus:ring-primary/50 outline-none transition-all appearance-none">
+                        {formCategories.map(c => <option key={c} value={c}>{t(c)}</option>)}
+                        <option value="__NEW__">+ {t('Thêm danh mục mới')}</option>
+                      </select>
+                      {editingItem && itemForm.category !== '__NEW__' && itemForm.category !== 'Uncategorized' && formCategories.length > 1 && (
+                        <button
+                          onClick={() => {
+                            setCategoryToDelete(itemForm.category);
+                            setShowDeleteCategoryModal(true);
+                          }}
+                          className="px-3 py-2 bg-red-500/10 text-red-500 hover:bg-red-500 hover:text-white border border-red-500/20 hover:border-red-500 rounded-xl transition-all flex items-center justify-center"
+                          title={t('Xóa danh mục')}
+                        >
+                          <Trash2 size={16} />
+                        </button>
                       )}
                     </div>
                   </div>
                 </div>
+
+                {itemForm.category === '__NEW__' && (
+                  <div className="space-y-1 animate-in slide-in-from-top-2 duration-300">
+                    <label className="text-xs font-bold text-primary uppercase ml-1">{t('Tên danh mục mới')}</label>
+                    <input
+                      value={customCategory}
+                      onChange={e => setCustomCategory(e.target.value)}
+                      className="w-full bg-background border border-primary/30 rounded-xl px-4 py-3 font-bold text-text-main focus:ring-2 focus:ring-primary/50 outline-none transition-all"
+                      placeholder={t('Nhập tên danh mục...')}
+                      autoFocus
+                    />
+                  </div>
+                )}
 
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-secondary uppercase ml-1">{t('Manual Stock')}</label>
@@ -1332,7 +1346,7 @@ export const Menu: React.FC = () => {
 
             <div className="pt-6 mt-2 border-t border-border flex gap-3">
               <button onClick={() => setIsItemModalOpen(false)} className="flex-1 py-3.5 border border-border rounded-xl font-bold text-secondary hover:bg-background transition-colors">{t('Cancel')}</button>
-              <button onClick={handleSaveItem} disabled={!itemForm.name || !itemForm.price || !itemForm.category || isUploading} className="flex-1 py-3.5 bg-primary text-background rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary-hover transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+              <button onClick={handleSaveItem} disabled={!itemForm.name || !itemForm.price || isUploading} className="flex-1 py-3.5 bg-primary text-background rounded-xl font-bold shadow-lg shadow-primary/20 hover:bg-primary-hover transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2">
                 {isUploading ? <Loader2 className="animate-spin" /> : <Save size={18} />}
                 {t('Save')}
               </button>
@@ -1425,6 +1439,20 @@ export const Menu: React.FC = () => {
         onConfirm={handleDeleteItem}
         isDanger={true}
         confirmText={t('Delete')}
+      />
+
+      {/* Category Delete Confirmation */}
+      <ConfirmModal
+        isOpen={showDeleteCategoryModal}
+        title={t('Xóa danh mục')}
+        message={t(`Bạn có chắc muốn xóa danh mục "${categoryToDelete}"? Tất cả các món trong danh mục này sẽ được chuyển sang "Uncategorized".`)}
+        onClose={() => {
+          setShowDeleteCategoryModal(false);
+          setCategoryToDelete(null);
+        }}
+        onConfirm={handleDeleteCategory}
+        isDanger={true}
+        confirmText={t('Xóa danh mục')}
       />
     </div>
   );
