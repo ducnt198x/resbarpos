@@ -134,7 +134,7 @@ export const useSettingsLogic = () => {
     const demoInfo = DemoService.getInfo();
     // Demo/trial: block sync + import/export until unlocked
     if (demoInfo.enabled && !demoInfo.syncEnabled) {
-      if (actionId === 'export_data' || actionId === 'import_data' || actionId === 'sync_now') {
+      if (actionId === 'export_data' || actionId === 'sync_now') {
         showToast('Bản demo: cần ID đồng bộ để mở chức năng này.', 'warning');
         return;
       }
